@@ -20,7 +20,7 @@ export function LoadingProgress({ progress }: Props) {
   if (progress.phase === 'idle' || progress.phase === 'done') return null
 
   const percentage = progress.total > 0
-    ? Math.round((progress.current / progress.total) * 100)
+    ? Math.min(100, Math.round((progress.current / progress.total) * 100))
     : 0
 
   return (

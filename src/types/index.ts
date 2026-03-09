@@ -27,6 +27,8 @@ export interface EnrichedFollower {
   postsCount: number
   createdAt?: string
   indexedAt?: string
+  /** Position in the getFollowers results (0 = most recent, higher = followed longer ago) */
+  followerIndex: number
 }
 
 /**
@@ -60,3 +62,37 @@ export interface FollowerStats {
   avgFollowersOfFollowers: number
   avgPostsOfFollowers: number
 }
+
+export interface FollowerCategoryDef {
+  id: string
+  label: string
+  description: string
+  filter: (f: EnrichedFollower) => boolean
+  sortKey: keyof Pick<EnrichedFollower, 'postsCount' | 'followersCount' | 'followsCount' | 'followerIndex'>
+  sortAsc?: boolean
+  limit?: number
+}
+
+/** Returns the age of an account in milliseconds, or 0 if createdAt is missing */
+function accountAgeMs(f: EnrichedFollower): number {
+  return f.createdAt ? Date.now() - new Date(f.createdAt).getTime() : 0
+}
+
+const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000
+const SIX_MONTHS_MS = 6 * ONE_MONTH_MS
+
+export const FOLLOWER_CATEGORIES: FollowerCategoryDef[] = [
+  {
+    id: 'lurkers',
+    label: 'Lurkers',
+    description: '<100 posts & 6+ months old, or <10 posts & 1+ month old',
+    filter: (f) => {
+      const age = accountAgeMs(f)
+      return (f.postsCount < 100 && age > SIX_MONTHS_MS)
+          || (f.postsCount < 10 && age > ONE_MONTH_MS)
+    },
+    sortKey: 'followerIndex',
+    sortAsc: false, // highest index = followed longest ago → shown first
+    limit: 50,
+  },
+]

@@ -35,28 +35,57 @@ export function useFollowerAnalysis() {
       setProgress({ phase: 'profile', current: 0, total: 1, message: 'Loading profile...' })
       const profile = await getProfile(handle)
 
+      // Estimate total work units across all phases so the bar never resets.
+      // Work = 1 (profile) + followersCount + followsCount + followersCount (enriching)
+      // These estimates are adjusted upward as actual counts come in from pagination,
+      // since profile counts can underestimate the real paginated totals.
+      let estFollowers = profile.followersCount ?? 0
+      let estFollows = profile.followsCount ?? 0
+      let totalWork = 1 + estFollowers + estFollows + estFollowers
+      let completed = 1 // profile fetch done
+
       // Step 2: Paginate through all followers
-      setProgress({ phase: 'followers', current: 0, total: profile.followersCount ?? 0, message: 'Fetching followers...' })
-      const followers = await getAllFollowers(handle, (loaded, total) => {
-        setProgress({ phase: 'followers', current: loaded, total, message: `Fetching followers (${loaded}/${total})...` })
+      setProgress({ phase: 'followers', current: completed, total: totalWork, message: 'Fetching followers...' })
+      const followers = await getAllFollowers(handle, (loaded) => {
+        // If the actual count exceeds the estimate, revise upward
+        if (loaded > estFollowers) {
+          totalWork += (loaded - estFollowers) * 2 // followers + enriching
+          estFollowers = loaded
+        }
+        setProgress({ phase: 'followers', current: completed + loaded, total: totalWork, message: `Fetching followers (${loaded}/${estFollowers})...` })
       })
+      // Final correction after all followers are fetched
+      if (followers.length !== estFollowers) {
+        totalWork += (followers.length - estFollowers) * 2
+        estFollowers = followers.length
+      }
+      completed += followers.length
 
       // Step 3: Fetch following list for mutual detection
-      setProgress({ phase: 'following', current: 0, total: profile.followsCount ?? 0, message: 'Fetching following list...' })
-      const following = await getAllFollowing(handle, (loaded, total) => {
-        setProgress({ phase: 'following', current: loaded, total, message: `Fetching following (${loaded}/${total})...` })
+      setProgress({ phase: 'following', current: completed, total: totalWork, message: 'Fetching following list...' })
+      const following = await getAllFollowing(handle, (loaded) => {
+        if (loaded > estFollows) {
+          totalWork += loaded - estFollows
+          estFollows = loaded
+        }
+        setProgress({ phase: 'following', current: completed + loaded, total: totalWork, message: `Fetching following (${loaded}/${estFollows})...` })
       })
+      if (following.length !== estFollows) {
+        totalWork += following.length - estFollows
+        estFollows = following.length
+      }
+      completed += following.length
       const followingDids = new Set(following.map(f => f.did))
 
       // Step 4: Enrich follower profiles with full stats
       const followerDids = followers.map(f => f.did)
-      setProgress({ phase: 'enriching', current: 0, total: followerDids.length, message: 'Enriching profiles...' })
-      const enriched = await enrichProfiles(followerDids, (loaded, total) => {
-        setProgress({ phase: 'enriching', current: loaded, total, message: `Enriching profiles (${loaded}/${total})...` })
+      setProgress({ phase: 'enriching', current: completed, total: totalWork, message: 'Enriching profiles...' })
+      const enriched = await enrichProfiles(followerDids, (loaded) => {
+        setProgress({ phase: 'enriching', current: completed + loaded, total: totalWork, message: `Enriching profiles (${loaded}/${followerDids.length})...` })
       })
 
       // Step 5: Map to EnrichedFollower objects
-      const enrichedFollowers: EnrichedFollower[] = followers.map(f => {
+      const enrichedFollowers: EnrichedFollower[] = followers.map((f, i) => {
         const detailed = enriched.get(f.did)
         return {
           did: f.did,
@@ -69,6 +98,7 @@ export function useFollowerAnalysis() {
           postsCount: detailed?.postsCount ?? 0,
           createdAt: detailed?.createdAt,
           indexedAt: detailed?.indexedAt,
+          followerIndex: i,
         }
       })
 
