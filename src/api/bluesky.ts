@@ -140,3 +140,236 @@ export async function enrichProfiles(
 
   return profiles
 }
+
+/** Scoring weights for interaction types */
+const WEIGHTS = { like: 1, repost: 2, reply: 3, quote: 3 }
+
+/**
+ * Computes bidirectional interaction scores using a 3-phase algorithm:
+ *
+ * Phase 1 — Incoming: Fetch the target's posts from the last year and score
+ * everyone who liked, replied, reposted, or quote-posted them. Take the top
+ * 100 scorers as "friends."
+ *
+ * Phase 2 — Outgoing: For each friend, fetch their posts from the last year
+ * and score based on how much the target replied, reposted, quote-posted, or
+ * liked those friends' posts.
+ *
+ * Phase 3 — Closeness: Combine the incoming and outgoing scores using a
+ * geometric mean (sqrt(incoming * outgoing)) which favors balanced, mutual
+ * interaction. Return the top 20.
+ *
+ * @param did - The target user's DID
+ * @param onProgress - Called after each API call with (completedCalls)
+ * @returns Map of DID → interaction score for the top 20 interactors
+ */
+export async function computeBestieScores(
+  did: string,
+  onProgress: (completed: number, message: string) => void,
+): Promise<Map<string, number>> {
+  let completed = 0
+  const ONE_YEAR_AGO = Date.now() - 365 * 24 * 60 * 60 * 1000
+
+  const addScore = (map: Map<string, number>, d: string, points: number) => {
+    if (d && d !== did) map.set(d, (map.get(d) ?? 0) + points)
+  }
+
+  // ── Phase 1: Incoming — score everyone who interacted with the target ──
+
+  // 1a. Fetch target's feed for the last year to collect their post URIs
+  const targetFeedItems: any[] = []
+  let cursor: string | undefined
+  let reachedCutoff = false
+
+  do {
+    const res = await agent.getAuthorFeed({
+      actor: did,
+      limit: 100,
+      cursor,
+      filter: 'posts_with_replies',
+    })
+    for (const item of res.data.feed) {
+      const postDate = new Date(item.post.indexedAt).getTime()
+      if (postDate < ONE_YEAR_AGO) {
+        reachedCutoff = true
+        break
+      }
+      targetFeedItems.push(item)
+    }
+    cursor = res.data.cursor
+    completed++
+    onProgress(completed, `Fetching your posts...`)
+    if (!cursor || reachedCutoff) break
+    await delay(200)
+  } while (true)
+
+  // Collect target's original post URIs (not reposts)
+  const targetPostUris: string[] = []
+  for (const item of targetFeedItems) {
+    if (item.post.author.did === did && !item.reason) {
+      targetPostUris.push(item.post.uri)
+    }
+  }
+
+  // 1b. For each target post, fetch who liked, replied, and reposted it (3 calls in parallel per post)
+  const incomingScores = new Map<string, number>()
+
+  for (let pi = 0; pi < targetPostUris.length; pi++) {
+    const uri = targetPostUris[pi]
+
+    const [likesRes, threadRes, repostsRes] = await Promise.allSettled([
+      agent.getLikes({ uri, limit: 100 }),
+      agent.getPostThread({ uri, depth: 1, parentHeight: 0 }),
+      agent.getRepostedBy({ uri, limit: 100 }),
+    ])
+
+    if (likesRes.status === 'fulfilled') {
+      for (const like of likesRes.value.data.likes) {
+        addScore(incomingScores, like.actor.did, WEIGHTS.like)
+      }
+    }
+    if (threadRes.status === 'fulfilled') {
+      const thread = threadRes.value.data.thread as any
+      if (thread?.replies) {
+        for (const reply of thread.replies) {
+          addScore(incomingScores, reply?.post?.author?.did, WEIGHTS.reply)
+        }
+      }
+    }
+    if (repostsRes.status === 'fulfilled') {
+      for (const profile of repostsRes.value.data.repostedBy) {
+        addScore(incomingScores, profile.did, WEIGHTS.repost)
+      }
+    }
+
+    completed++
+    onProgress(completed, `Scoring incoming interactions (${pi + 1}/${targetPostUris.length} posts)...`)
+    await delay(200)
+  }
+
+  // Take top 100 incoming scorers as "friends"
+  const TOP_FRIENDS = 100
+  const sortedIncoming = [...incomingScores.entries()].sort((a, b) => b[1] - a[1])
+  const friends = sortedIncoming.slice(0, TOP_FRIENDS)
+  const friendDids = new Set(friends.map(([d]) => d))
+
+  // ── Phase 2: Outgoing — score how much the target interacts with each friend ──
+
+  const outgoingScores = new Map<string, number>()
+
+  // 2a. Extract outgoing replies, quotes, and reposts from the target's feed (already fetched)
+  for (const item of targetFeedItems) {
+    const parentDid = (item.reply as any)?.parent?.author?.did
+    if (parentDid && friendDids.has(parentDid)) {
+      addScore(outgoingScores, parentDid, WEIGHTS.reply)
+    }
+
+    const embed = item.post.embed as any
+    if (embed?.$type === 'app.bsky.embed.record#view') {
+      const quotedDid = embed.record?.author?.did
+      if (quotedDid && friendDids.has(quotedDid)) {
+        addScore(outgoingScores, quotedDid, WEIGHTS.quote)
+      }
+    }
+    if (embed?.$type === 'app.bsky.embed.recordWithMedia#view') {
+      const quotedDid = embed.record?.record?.author?.did
+      if (quotedDid && friendDids.has(quotedDid)) {
+        addScore(outgoingScores, quotedDid, WEIGHTS.quote)
+      }
+    }
+
+    if (item.reason?.$type === 'app.bsky.feed.defs#reasonRepost') {
+      const repostedDid = item.post.author.did
+      if (friendDids.has(repostedDid)) {
+        addScore(outgoingScores, repostedDid, WEIGHTS.repost)
+      }
+    }
+  }
+
+  // 2b. For each friend, fetch their posts and check getLikes for the target's outgoing likes
+  // Process up to 3 friends concurrently to stay within rate limits
+  const CONCURRENCY = 3
+  let friendsDone = 0
+
+  const processFriend = async (friendDid: string) => {
+    let friendCursor: string | undefined
+    let friendCutoff = false
+
+    do {
+      let feedRes
+      try {
+        feedRes = await agent.getAuthorFeed({
+          actor: friendDid,
+          limit: 100,
+          cursor: friendCursor,
+          filter: 'posts_no_replies',
+        })
+      } catch { break }
+
+      // Collect post URIs from this page that need like-checking
+      const postUris: string[] = []
+      for (const item of feedRes.data.feed) {
+        const postDate = new Date(item.post.indexedAt).getTime()
+        if (postDate < ONE_YEAR_AGO) {
+          friendCutoff = true
+          break
+        }
+        if (item.post.author.did === friendDid && !item.reason) {
+          postUris.push(item.post.uri)
+        }
+      }
+
+      // Check likes on all posts from this page in parallel
+      const likeResults = await Promise.allSettled(
+        postUris.map(uri => agent.getLikes({ uri, limit: 100 }))
+      )
+      for (const res of likeResults) {
+        if (res.status === 'fulfilled') {
+          for (const like of res.value.data.likes) {
+            if (like.actor.did === did) {
+              addScore(outgoingScores, friendDid, WEIGHTS.like)
+              break
+            }
+          }
+        }
+      }
+
+      friendCursor = feedRes.data.cursor
+      completed++
+      friendsDone++
+      onProgress(completed, `Checking outgoing interactions (${friendsDone}/${friends.length} people)...`)
+      if (!friendCursor || friendCutoff) break
+      await delay(200)
+    } while (true)
+  }
+
+  // Run friends through a concurrency pool
+  const friendQueue = friends.map(([d]) => d)
+  const pool: Promise<void>[] = []
+  for (const friendDid of friendQueue) {
+    const p = processFriend(friendDid)
+    pool.push(p)
+    if (pool.length >= CONCURRENCY) {
+      await Promise.race(pool)
+      // Remove settled promises from the pool
+      for (let i = pool.length - 1; i >= 0; i--) {
+        const settled = await Promise.race([pool[i].then(() => true), Promise.resolve(false)])
+        if (settled) pool.splice(i, 1)
+      }
+    }
+  }
+  await Promise.all(pool)
+
+  // ── Phase 3: Closeness-weighted combination ──
+  // Geometric mean sqrt(incoming * outgoing) favors balanced mutual interaction
+  const combined = new Map<string, number>()
+  for (const [d, incoming] of friends) {
+    const outgoing = outgoingScores.get(d) ?? 0
+    if (outgoing > 0) {
+      combined.set(d, Math.sqrt(incoming * outgoing))
+    }
+  }
+
+  const sorted = [...combined.entries()].sort((a, b) => b[1] - a[1])
+  return new Map(sorted.slice(0, 20))
+}

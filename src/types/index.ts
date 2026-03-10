@@ -29,6 +29,8 @@ export interface EnrichedFollower {
   indexedAt?: string
   /** Position in the getFollowers results (0 = most recent, higher = followed longer ago) */
   followerIndex: number
+  /** Bidirectional interaction score (likes, replies, quotes, reposts). 0 = not scored or no interactions */
+  interactionScore: number
 }
 
 /**
@@ -37,7 +39,7 @@ export interface EnrichedFollower {
  * On error, the phase jumps to 'error' from any step.
  */
 export interface AnalysisProgress {
-  phase: 'idle' | 'profile' | 'followers' | 'following' | 'enriching' | 'done' | 'error'
+  phase: 'idle' | 'profile' | 'followers' | 'following' | 'enriching' | 'interactions' | 'done' | 'error'
   current: number
   total: number
   message: string
@@ -88,6 +90,14 @@ function timeSinceIndexed(f: EnrichedFollower): number {
 }
 
 export const FOLLOWER_CATEGORIES: FollowerCategoryDef[] = [
+  {
+    id: 'besties',
+    label: 'Besties',
+    description: 'Followers you interact with most — scored by mutual likes, replies, quotes & reposts over the last year',
+    filter: (f) => f.interactionScore > 0,
+    sortFn: (a, b) => a.interactionScore - b.interactionScore,
+    sortAsc: false, // highest score first
+  },
   {
     id: 'ghosts',
     label: 'Ghosts',

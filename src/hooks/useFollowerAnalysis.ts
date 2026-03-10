@@ -10,7 +10,7 @@
  */
 
 import { useState, useCallback } from 'react'
-import { getProfile, getAllFollowers, getAllFollowing, enrichProfiles } from '../api/bluesky'
+import { getProfile, getAllFollowers, getAllFollowing, enrichProfiles, computeBestieScores } from '../api/bluesky'
 import { computeStats } from '../utils/stats'
 import type { AnalysisProgress, AnalysisResult, EnrichedFollower } from '../types'
 
@@ -36,12 +36,18 @@ export function useFollowerAnalysis() {
       const profile = await getProfile(handle)
 
       // Estimate total work units across all phases so the bar never resets.
-      // Work = 1 (profile) + followersCount + followsCount + followersCount (enriching)
+      // Work = 1 (profile) + followers + follows + enriching + interactions
       // These estimates are adjusted upward as actual counts come in from pagination,
       // since profile counts can underestimate the real paginated totals.
       let estFollowers = profile.followersCount ?? 0
       let estFollows = profile.followsCount ?? 0
-      let totalWork = 1 + estFollowers + estFollows + estFollowers
+      // Interaction estimates: feed pages + per-post incoming checks + friend feed pages
+      const estPosts = Math.min(profile.postsCount ?? 0, 3650)
+      const estFeedPages = Math.ceil(estPosts / 100)
+      const estPostChecks = estPosts // one progress tick per post for incoming checks
+      const estFriendFeeds = 100 * 5 // up to 100 friends × ~5 feed pages each
+      const estInteractions = estFeedPages + estPostChecks + estFriendFeeds
+      let totalWork = 1 + estFollowers + estFollows + estFollowers + estInteractions
       let completed = 1 // profile fetch done
 
       // Step 2: Paginate through all followers
@@ -84,7 +90,15 @@ export function useFollowerAnalysis() {
         setProgress({ phase: 'enriching', current: completed + loaded, total: totalWork, message: `Enriching profiles (${loaded}/${followerDids.length})...` })
       })
 
-      // Step 5: Map to EnrichedFollower objects
+      completed += followers.length
+
+      // Step 5: Compute bestie interaction scores
+      setProgress({ phase: 'interactions', current: completed, total: totalWork, message: 'Analyzing interactions...' })
+      const bestieScores = await computeBestieScores(profile.did, (done, message) => {
+        setProgress({ phase: 'interactions', current: completed + done, total: totalWork, message })
+      })
+
+      // Step 6: Map to EnrichedFollower objects
       const enrichedFollowers: EnrichedFollower[] = followers.map((f, i) => {
         const detailed = enriched.get(f.did)
         return {
@@ -99,10 +113,11 @@ export function useFollowerAnalysis() {
           createdAt: detailed?.createdAt,
           indexedAt: detailed?.indexedAt,
           followerIndex: i,
+          interactionScore: bestieScores.get(f.did) ?? 0,
         }
       })
 
-      // Step 6: Compute aggregate statistics
+      // Step 7: Compute aggregate statistics
       const stats = computeStats(enrichedFollowers, followingDids)
 
       setResult({ profile, followers: enrichedFollowers, mutualDids: followingDids, stats })
