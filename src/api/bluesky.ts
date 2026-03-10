@@ -172,7 +172,8 @@ export async function computeSharedFollows(
   isAborted?: IsAborted,
 ): Promise<Map<string, number>> {
   const sharedCounts = new Map<string, number>()
-  let done = 0
+  let pagesDone = 0
+  let followersDone = 0
   const CONCURRENCY = 3
 
   const processFollower = async (followerDid: string) => {
@@ -192,6 +193,7 @@ export async function computeSharedFollows(
         }
       }
 
+      pagesDone++
       cursor = res.data.cursor
       if (!cursor) break
       await delay(200)
@@ -200,8 +202,8 @@ export async function computeSharedFollows(
     if (count > 0) {
       sharedCounts.set(followerDid, count)
     }
-    done++
-    onProgress(done, `Seeing who runs in the same circles (${done}/${followerDids.length})...`)
+    followersDone++
+    onProgress(pagesDone, `Seeing who runs in the same circles (${followersDone}/${followerDids.length})...`)
   }
 
   // Run through a concurrency pool
@@ -294,41 +296,52 @@ export async function computeBestieScores(
     }
   }
 
-  // 1b. For each target post, fetch who liked, replied, and reposted it (3 calls in parallel per post)
+  // 1b. For each target post, fetch who liked, replied, and reposted it
+  // Process posts in small batches to avoid overwhelming the browser
   const incomingScores = new Map<string, number>()
+  const POST_BATCH = 3
 
-  for (let pi = 0; pi < targetPostUris.length; pi++) {
+  for (let pi = 0; pi < targetPostUris.length; pi += POST_BATCH) {
     checkAborted(isAborted)
-    const uri = targetPostUris[pi]
+    const batch = targetPostUris.slice(pi, pi + POST_BATCH)
 
-    const [likesRes, threadRes, repostsRes] = await Promise.allSettled([
-      agent.getLikes({ uri, limit: 100 }),
-      agent.getPostThread({ uri, depth: 1, parentHeight: 0 }),
-      agent.getRepostedBy({ uri, limit: 100 }),
-    ])
+    const batchResults = await Promise.allSettled(
+      batch.flatMap(uri => [
+        agent.getLikes({ uri, limit: 100 }),
+        agent.getPostThread({ uri, depth: 1, parentHeight: 0 }),
+        agent.getRepostedBy({ uri, limit: 100 }),
+      ])
+    )
 
-    if (likesRes.status === 'fulfilled') {
-      for (const like of likesRes.value.data.likes) {
-        addScore(incomingScores, like.actor.did, WEIGHTS.like)
+    // Process results in groups of 3 (likes, thread, reposts per post)
+    for (let bi = 0; bi < batch.length; bi++) {
+      const likesRes = batchResults[bi * 3]
+      const threadRes = batchResults[bi * 3 + 1]
+      const repostsRes = batchResults[bi * 3 + 2]
+
+      if (likesRes.status === 'fulfilled') {
+        for (const like of (likesRes.value as any).data.likes) {
+          addScore(incomingScores, like.actor.did, WEIGHTS.like)
+        }
       }
-    }
-    if (threadRes.status === 'fulfilled') {
-      const thread = threadRes.value.data.thread as any
-      if (thread?.replies) {
-        for (const reply of thread.replies) {
-          addScore(incomingScores, reply?.post?.author?.did, WEIGHTS.reply)
+      if (threadRes.status === 'fulfilled') {
+        const thread = (threadRes.value as any).data.thread
+        if (thread?.replies) {
+          for (const reply of thread.replies) {
+            addScore(incomingScores, reply?.post?.author?.did, WEIGHTS.reply)
+          }
+        }
+      }
+      if (repostsRes.status === 'fulfilled') {
+        for (const profile of (repostsRes.value as any).data.repostedBy) {
+          addScore(incomingScores, profile.did, WEIGHTS.repost)
         }
       }
     }
-    if (repostsRes.status === 'fulfilled') {
-      for (const profile of repostsRes.value.data.repostedBy) {
-        addScore(incomingScores, profile.did, WEIGHTS.repost)
-      }
-    }
 
-    completed++
-    onProgress(completed, `Seeing who shows up (${pi + 1}/${targetPostUris.length} posts)...`)
-    await delay(200)
+    completed += batch.length * 3 // 3 API calls per post (getLikes + getPostThread + getRepostedBy)
+    onProgress(completed, `Seeing who shows up (${Math.min(pi + POST_BATCH, targetPostUris.length)}/${targetPostUris.length} posts)...`)
+    if (pi + POST_BATCH < targetPostUris.length) await delay(200)
   }
 
   // Take top 100 incoming scorers as "friends"
@@ -382,6 +395,7 @@ export async function computeBestieScores(
     do {
       checkAborted(isAborted)
       let feedRes
+      let pageCalls = 1 // 1 getAuthorFeed call
       try {
         feedRes = await agent.getAuthorFeed({
           actor: friendDid,
@@ -408,6 +422,7 @@ export async function computeBestieScores(
       const LIKE_BATCH = 5
       for (let li = 0; li < postUris.length; li += LIKE_BATCH) {
         const batch = postUris.slice(li, li + LIKE_BATCH)
+        pageCalls += batch.length // each getLikes = 1 API call
         const likeResults = await Promise.allSettled(
           batch.map(uri => agent.getLikes({ uri, limit: 100 }))
         )
@@ -425,7 +440,7 @@ export async function computeBestieScores(
       }
 
       friendCursor = feedRes.data.cursor
-      completed++
+      completed += pageCalls
       onProgress(completed, `Checking if the love goes both ways (${friendsDone + 1}/${friends.length})...`)
       if (!friendCursor || friendCutoff) break
       await delay(200)

@@ -42,9 +42,13 @@ export interface EnrichedFollower {
  */
 export interface AnalysisProgress {
   phase: 'idle' | 'profile' | 'followers' | 'following' | 'enriching' | 'interactions' | 'connections' | 'done' | 'error'
+  /** API calls completed so far */
   current: number
+  /** Estimated total API calls */
   total: number
   message: string
+  /** Locked time estimate in seconds, computed after the fast phases */
+  estimatedSeconds?: number
 }
 
 /**

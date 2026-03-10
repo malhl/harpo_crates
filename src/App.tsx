@@ -86,8 +86,9 @@ function App() {
 
       {/* Footer — privacy assurance */}
       <footer className="border-t border-cream-dark mt-16">
-        <div className="max-w-5xl mx-auto px-4 py-4 text-center text-xs text-navy-faint">
-          Harpo Crates uses the public AT Protocol API. No data is stored or transmitted to any server.
+        <div className="max-w-5xl mx-auto px-4 py-4 text-center text-xs text-navy-faint space-y-1">
+          <p>Harpo Crates uses the public AT Protocol API. No data is stored or transmitted to any server.</p>
+          <p>Last updated {__BUILD_DATE__} · Built by <a href="https://github.com/malhl" target="_blank" rel="noopener noreferrer" className="underline hover:text-navy">malhl</a></p>
         </div>
       </footer>
     </div>
