@@ -69,7 +69,7 @@ export async function getAllFollowers(
     followers.push(...res.data.followers)
     // Use the subject's followersCount as the total estimate for the progress bar.
     // Fall back to the current loaded count if the count isn't available.
-    const total = res.data.subject.followersCount ?? followers.length
+    const total = (res.data.subject as any).followersCount ?? followers.length
     onProgress(followers.length, total)
     cursor = res.data.cursor
     if (cursor) await delay(200) // Rate limit: wait between pages
@@ -99,7 +99,7 @@ export async function getAllFollowing(
   do {
     const res = await agent.getFollows({ actor: handle, limit: 100, cursor })
     following.push(...res.data.follows)
-    const total = res.data.subject.followsCount ?? following.length
+    const total = (res.data.subject as any).followsCount ?? following.length
     onProgress(following.length, total)
     cursor = res.data.cursor
     if (cursor) await delay(200)

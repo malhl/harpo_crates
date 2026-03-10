@@ -34,6 +34,8 @@ export function makeFollower(overrides: Partial<EnrichedFollower> = {}): Enriche
     postsCount: 100,
     createdAt: '2024-01-01T00:00:00.000Z',
     indexedAt: '2024-06-01T00:00:00.000Z',
+    followerIndex: 0,
+    interactionScore: 0,
     ...overrides,
   }
 }
