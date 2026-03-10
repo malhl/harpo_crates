@@ -36,6 +36,7 @@ export function makeFollower(overrides: Partial<EnrichedFollower> = {}): Enriche
     indexedAt: '2024-06-01T00:00:00.000Z',
     followerIndex: 0,
     interactionScore: 0,
+    sharedFollowsCount: 0,
     ...overrides,
   }
 }

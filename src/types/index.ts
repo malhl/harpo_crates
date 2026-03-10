@@ -31,6 +31,8 @@ export interface EnrichedFollower {
   followerIndex: number
   /** Bidirectional interaction score (likes, replies, quotes, reposts). 0 = not scored or no interactions */
   interactionScore: number
+  /** Number of accounts this follower follows that the target also follows */
+  sharedFollowsCount: number
 }
 
 /**
@@ -39,7 +41,7 @@ export interface EnrichedFollower {
  * On error, the phase jumps to 'error' from any step.
  */
 export interface AnalysisProgress {
-  phase: 'idle' | 'profile' | 'followers' | 'following' | 'enriching' | 'interactions' | 'done' | 'error'
+  phase: 'idle' | 'profile' | 'followers' | 'following' | 'enriching' | 'interactions' | 'connections' | 'done' | 'error'
   current: number
   total: number
   message: string
@@ -97,6 +99,15 @@ export const FOLLOWER_CATEGORIES: FollowerCategoryDef[] = [
     filter: (f) => f.interactionScore > 0,
     sortFn: (a, b) => a.interactionScore - b.interactionScore,
     sortAsc: false, // highest score first
+  },
+  {
+    id: 'inner-circle',
+    label: 'Inner Circle',
+    description: 'Followers who share the most follows with you — ranked by number of accounts you both follow',
+    filter: (f) => f.sharedFollowsCount > 0,
+    sortFn: (a, b) => a.sharedFollowsCount - b.sharedFollowsCount,
+    sortAsc: false,
+    limit: 20,
   },
   {
     id: 'ghosts',

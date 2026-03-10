@@ -141,6 +141,71 @@ export async function enrichProfiles(
   return profiles
 }
 
+/**
+ * Computes how many of the target's follows each follower also follows.
+ * Fetches each follower's following list and intersects with the target's.
+ * Processes up to 3 followers concurrently for speed.
+ *
+ * @param followerDids - DIDs of all followers to check
+ * @param targetFollowingDids - Set of DIDs the target user follows
+ * @param onProgress - Called with (completed, message) after each follower
+ * @returns Map of follower DID → shared follow count
+ */
+export async function computeSharedFollows(
+  followerDids: string[],
+  targetFollowingDids: Set<string>,
+  onProgress: (completed: number, message: string) => void,
+): Promise<Map<string, number>> {
+  const sharedCounts = new Map<string, number>()
+  let done = 0
+  const CONCURRENCY = 3
+
+  const processFollower = async (followerDid: string) => {
+    let count = 0
+    let cursor: string | undefined
+
+    do {
+      let res
+      try {
+        res = await agent.getFollows({ actor: followerDid, limit: 100, cursor })
+      } catch { break }
+
+      for (const follow of res.data.follows) {
+        if (targetFollowingDids.has(follow.did)) {
+          count++
+        }
+      }
+
+      cursor = res.data.cursor
+      if (!cursor) break
+      await delay(200)
+    } while (true)
+
+    if (count > 0) {
+      sharedCounts.set(followerDid, count)
+    }
+    done++
+    onProgress(done, `Comparing follows (${done}/${followerDids.length})...`)
+  }
+
+  // Run through a concurrency pool
+  const pool: Promise<void>[] = []
+  for (const did of followerDids) {
+    const p = processFollower(did)
+    pool.push(p)
+    if (pool.length >= CONCURRENCY) {
+      await Promise.race(pool)
+      for (let i = pool.length - 1; i >= 0; i--) {
+        const settled = await Promise.race([pool[i].then(() => true), Promise.resolve(false)])
+        if (settled) pool.splice(i, 1)
+      }
+    }
+  }
+  await Promise.all(pool)
+
+  return sharedCounts
+}
+
 /** Scoring weights for interaction types */
 const WEIGHTS = { like: 1, repost: 2, reply: 3, quote: 3 }
 

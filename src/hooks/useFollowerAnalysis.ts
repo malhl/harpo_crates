@@ -10,7 +10,7 @@
  */
 
 import { useState, useCallback } from 'react'
-import { getProfile, getAllFollowers, getAllFollowing, enrichProfiles, computeBestieScores } from '../api/bluesky'
+import { getProfile, getAllFollowers, getAllFollowing, enrichProfiles, computeBestieScores, computeSharedFollows } from '../api/bluesky'
 import { computeStats } from '../utils/stats'
 import type { AnalysisProgress, AnalysisResult, EnrichedFollower } from '../types'
 
@@ -47,7 +47,8 @@ export function useFollowerAnalysis() {
       const estPostChecks = estPosts // one progress tick per post for incoming checks
       const estFriendFeeds = 100 * 5 // up to 100 friends × ~5 feed pages each
       const estInteractions = estFeedPages + estPostChecks + estFriendFeeds
-      let totalWork = 1 + estFollowers + estFollows + estFollowers + estInteractions
+      const estConnections = estFollowers // one tick per follower for shared follows
+      let totalWork = 1 + estFollowers + estFollows + estFollowers + estInteractions + estConnections
       let completed = 1 // profile fetch done
 
       // Step 2: Paginate through all followers
@@ -98,7 +99,16 @@ export function useFollowerAnalysis() {
         setProgress({ phase: 'interactions', current: completed + done, total: totalWork, message })
       })
 
-      // Step 6: Map to EnrichedFollower objects
+      completed += estInteractions
+
+      // Step 6: Compute shared follows
+      setProgress({ phase: 'connections', current: completed, total: totalWork, message: 'Comparing follows...' })
+      const sharedFollows = await computeSharedFollows(followerDids, followingDids, (done, message) => {
+        setProgress({ phase: 'connections', current: completed + done, total: totalWork, message })
+      })
+      completed += followers.length
+
+      // Step 7: Map to EnrichedFollower objects
       const enrichedFollowers: EnrichedFollower[] = followers.map((f, i) => {
         const detailed = enriched.get(f.did)
         return {
@@ -114,6 +124,7 @@ export function useFollowerAnalysis() {
           indexedAt: detailed?.indexedAt,
           followerIndex: i,
           interactionScore: bestieScores.get(f.did) ?? 0,
+          sharedFollowsCount: sharedFollows.get(f.did) ?? 0,
         }
       })
 
