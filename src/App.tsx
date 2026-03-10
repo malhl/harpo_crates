@@ -24,7 +24,7 @@ import { FollowerDashboard } from './components/FollowerDashboard'
 import { useFollowerAnalysis } from './hooks/useFollowerAnalysis'
 
 function App() {
-  const { progress, result, error, analyze, reset } = useFollowerAnalysis()
+  const { progress, result, error, analyze, reset, abort } = useFollowerAnalysis()
   // The analysis is "loading" if we're in any phase other than idle, done, or error
   const loading = !['idle', 'done', 'error'].includes(progress.phase)
 
@@ -53,7 +53,7 @@ function App() {
         />
 
         {/* Progress bar — auto-hides when idle or complete */}
-        <LoadingProgress progress={progress} />
+        <LoadingProgress progress={progress} onTimeout={abort} />
 
         {/* Error state — shown when any step of the pipeline fails */}
         {error && (

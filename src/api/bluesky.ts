@@ -28,6 +28,18 @@ const agent = new Agent({ service: 'https://public.api.bsky.app' })
 /** Simple promise-based delay for rate limiting between API calls */
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
+/** Abort checker type — returns true if the operation should stop */
+export type IsAborted = () => boolean
+
+class AbortedError extends Error {
+  constructor() { super('Analysis timed out — took too long relative to the estimate. Try again or try a smaller account.') }
+}
+
+/** Throws AbortedError if the abort signal is set */
+function checkAborted(isAborted?: IsAborted) {
+  if (isAborted?.()) throw new AbortedError()
+}
+
 /**
  * Fetches the full profile for a given Bluesky handle or DID.
  * Returns a ProfileViewDetailed which includes follower/following/post counts,
@@ -124,11 +136,13 @@ export async function getAllFollowing(
 export async function enrichProfiles(
   dids: string[],
   onProgress: (loaded: number, total: number) => void,
+  isAborted?: IsAborted,
 ): Promise<Map<string, ProfileViewDetailed>> {
   const profiles = new Map<string, ProfileViewDetailed>()
   const batchSize = 25 // Maximum allowed by the getProfiles endpoint
 
   for (let i = 0; i < dids.length; i += batchSize) {
+    checkAborted(isAborted)
     const batch = dids.slice(i, i + batchSize)
     const res = await agent.getProfiles({ actors: batch })
     for (const profile of res.data.profiles) {
@@ -155,6 +169,7 @@ export async function computeSharedFollows(
   followerDids: string[],
   targetFollowingDids: Set<string>,
   onProgress: (completed: number, message: string) => void,
+  isAborted?: IsAborted,
 ): Promise<Map<string, number>> {
   const sharedCounts = new Map<string, number>()
   let done = 0
@@ -165,6 +180,7 @@ export async function computeSharedFollows(
     let cursor: string | undefined
 
     do {
+      checkAborted(isAborted)
       let res
       try {
         res = await agent.getFollows({ actor: followerDid, limit: 100, cursor })
@@ -231,6 +247,7 @@ const WEIGHTS = { like: 1, repost: 2, reply: 3, quote: 3 }
 export async function computeBestieScores(
   did: string,
   onProgress: (completed: number, message: string) => void,
+  isAborted?: IsAborted,
 ): Promise<Map<string, number>> {
   let completed = 0
   const ONE_YEAR_AGO = Date.now() - 365 * 24 * 60 * 60 * 1000
@@ -247,6 +264,7 @@ export async function computeBestieScores(
   let reachedCutoff = false
 
   do {
+    checkAborted(isAborted)
     const res = await agent.getAuthorFeed({
       actor: did,
       limit: 100,
@@ -280,6 +298,7 @@ export async function computeBestieScores(
   const incomingScores = new Map<string, number>()
 
   for (let pi = 0; pi < targetPostUris.length; pi++) {
+    checkAborted(isAborted)
     const uri = targetPostUris[pi]
 
     const [likesRes, threadRes, repostsRes] = await Promise.allSettled([
@@ -361,6 +380,7 @@ export async function computeBestieScores(
     let friendCutoff = false
 
     do {
+      checkAborted(isAborted)
       let feedRes
       try {
         feedRes = await agent.getAuthorFeed({
@@ -448,6 +468,7 @@ export async function computeBestieScores(
   // Fetch each thread and count per-author replies
   const threadBonus = new Map<string, number>()
   for (let ti = 0; ti < longThreadRoots.length; ti++) {
+    checkAborted(isAborted)
     const { uri, targetReplies } = longThreadRoots[ti]
     let threadRes
     try {

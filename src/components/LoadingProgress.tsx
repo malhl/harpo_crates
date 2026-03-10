@@ -14,6 +14,7 @@ import type { AnalysisProgress } from '../types'
 
 interface Props {
   progress: AnalysisProgress
+  onTimeout?: () => void
 }
 
 function formatElapsed(seconds: number): string {
@@ -23,15 +24,27 @@ function formatElapsed(seconds: number): string {
   return `${s}s`
 }
 
-export function LoadingProgress({ progress }: Props) {
+function formatEstimate(seconds: number): string {
+  const minutes = Math.ceil(seconds / 60)
+  return `${minutes}m`
+}
+
+/** Threshold at which we lock the estimate (percentage) */
+const LOCK_THRESHOLD = 30
+/** If elapsed exceeds this multiple of the locked estimate, abort */
+const TIMEOUT_MULTIPLIER = 3
+
+export function LoadingProgress({ progress, onTimeout }: Props) {
   const [elapsed, setElapsed] = useState(0)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lockedEstimateRef = useRef<number | null>(null)
 
   const isActive = progress.phase !== 'idle' && progress.phase !== 'done' && progress.phase !== 'error'
 
   useEffect(() => {
     if (isActive) {
       setElapsed(0)
+      lockedEstimateRef.current = null
       intervalRef.current = setInterval(() => {
         setElapsed(prev => prev + 1)
       }, 1000)
@@ -56,6 +69,18 @@ export function LoadingProgress({ progress }: Props) {
     ? Math.min(100, Math.round((progress.current / progress.total) * 100))
     : 0
 
+  // Lock the total estimate once we pass the threshold
+  if (percentage >= LOCK_THRESHOLD && lockedEstimateRef.current === null && elapsed > 0) {
+    lockedEstimateRef.current = Math.round(elapsed / (percentage / 100))
+  }
+
+  const lockedEstimate = lockedEstimateRef.current
+
+  // Abort if elapsed exceeds 3x the locked estimate
+  if (lockedEstimate && elapsed > lockedEstimate * TIMEOUT_MULTIPLIER && onTimeout) {
+    onTimeout()
+  }
+
   return (
     <div className="w-full max-w-xl mx-auto mt-6">
       {/* Status message and percentage */}
@@ -71,9 +96,12 @@ export function LoadingProgress({ progress }: Props) {
           style={{ width: `${percentage}%` }}
         />
       </div>
-      {/* Elapsed time below the bar */}
+      {/* Elapsed time and locked total estimate below the bar */}
       <div className="text-xs text-navy-faint text-center mt-2">
         {formatElapsed(elapsed)}
+        {lockedEstimate && percentage < 100 && (
+          <span> / ~{formatEstimate(lockedEstimate)}</span>
+        )}
       </div>
     </div>
   )
