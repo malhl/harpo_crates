@@ -185,7 +185,7 @@ export async function computeSharedFollows(
       sharedCounts.set(followerDid, count)
     }
     done++
-    onProgress(done, `Comparing follows (${done}/${followerDids.length})...`)
+    onProgress(done, `Seeing who runs in the same circles (${done}/${followerDids.length})...`)
   }
 
   // Run through a concurrency pool
@@ -263,7 +263,7 @@ export async function computeBestieScores(
     }
     cursor = res.data.cursor
     completed++
-    onProgress(completed, `Fetching your posts...`)
+    onProgress(completed, `Pulling up their posts...`)
     if (!cursor || reachedCutoff) break
     await delay(200)
   } while (true)
@@ -308,7 +308,7 @@ export async function computeBestieScores(
     }
 
     completed++
-    onProgress(completed, `Scoring incoming interactions (${pi + 1}/${targetPostUris.length} posts)...`)
+    onProgress(completed, `Seeing who shows up (${pi + 1}/${targetPostUris.length} posts)...`)
     await delay(200)
   }
 
@@ -401,11 +401,11 @@ export async function computeBestieScores(
 
       friendCursor = feedRes.data.cursor
       completed++
-      friendsDone++
-      onProgress(completed, `Checking outgoing interactions (${friendsDone}/${friends.length} people)...`)
+      onProgress(completed, `Checking if the love goes both ways (${friendsDone + 1}/${friends.length})...`)
       if (!friendCursor || friendCutoff) break
       await delay(200)
     } while (true)
+    friendsDone++
   }
 
   // Run friends through a concurrency pool

@@ -32,7 +32,7 @@ export function useFollowerAnalysis() {
 
     try {
       // Step 1: Fetch the target user's profile
-      setProgress({ phase: 'profile', current: 0, total: 1, message: 'Loading profile...' })
+      setProgress({ phase: 'profile', current: 0, total: 1, message: 'Looking them up...' })
       const profile = await getProfile(handle)
 
       // Estimate total work units across all phases so the bar never resets.
@@ -52,14 +52,14 @@ export function useFollowerAnalysis() {
       let completed = 1 // profile fetch done
 
       // Step 2: Paginate through all followers
-      setProgress({ phase: 'followers', current: completed, total: totalWork, message: 'Fetching followers...' })
+      setProgress({ phase: 'followers', current: completed, total: totalWork, message: 'Rounding up followers...' })
       const followers = await getAllFollowers(handle, (loaded) => {
         // If the actual count exceeds the estimate, revise upward
         if (loaded > estFollowers) {
           totalWork += (loaded - estFollowers) * 2 // followers + enriching
           estFollowers = loaded
         }
-        setProgress({ phase: 'followers', current: completed + loaded, total: totalWork, message: `Fetching followers (${loaded}/${estFollowers})...` })
+        setProgress({ phase: 'followers', current: completed + loaded, total: totalWork, message: `Rounding up followers (${loaded}/${estFollowers})...` })
       })
       // Final correction after all followers are fetched
       if (followers.length !== estFollowers) {
@@ -69,13 +69,13 @@ export function useFollowerAnalysis() {
       completed += followers.length
 
       // Step 3: Fetch following list for mutual detection
-      setProgress({ phase: 'following', current: completed, total: totalWork, message: 'Fetching following list...' })
+      setProgress({ phase: 'following', current: completed, total: totalWork, message: 'Checking who they follow...' })
       const following = await getAllFollowing(handle, (loaded) => {
         if (loaded > estFollows) {
           totalWork += loaded - estFollows
           estFollows = loaded
         }
-        setProgress({ phase: 'following', current: completed + loaded, total: totalWork, message: `Fetching following (${loaded}/${estFollows})...` })
+        setProgress({ phase: 'following', current: completed + loaded, total: totalWork, message: `Checking who they follow (${loaded}/${estFollows})...` })
       })
       if (following.length !== estFollows) {
         totalWork += following.length - estFollows
@@ -86,15 +86,15 @@ export function useFollowerAnalysis() {
 
       // Step 4: Enrich follower profiles with full stats
       const followerDids = followers.map(f => f.did)
-      setProgress({ phase: 'enriching', current: completed, total: totalWork, message: 'Enriching profiles...' })
+      setProgress({ phase: 'enriching', current: completed, total: totalWork, message: 'Getting the details...' })
       const enriched = await enrichProfiles(followerDids, (loaded) => {
-        setProgress({ phase: 'enriching', current: completed + loaded, total: totalWork, message: `Enriching profiles (${loaded}/${followerDids.length})...` })
+        setProgress({ phase: 'enriching', current: completed + loaded, total: totalWork, message: `Getting the details (${loaded}/${followerDids.length})...` })
       })
 
       completed += followers.length
 
       // Step 5: Compute bestie interaction scores
-      setProgress({ phase: 'interactions', current: completed, total: totalWork, message: 'Analyzing interactions...' })
+      setProgress({ phase: 'interactions', current: completed, total: totalWork, message: 'Finding the besties...' })
       const bestieScores = await computeBestieScores(profile.did, (done, message) => {
         setProgress({ phase: 'interactions', current: completed + done, total: totalWork, message })
       })
@@ -102,7 +102,7 @@ export function useFollowerAnalysis() {
       completed += estInteractions
 
       // Step 6: Compute shared follows
-      setProgress({ phase: 'connections', current: completed, total: totalWork, message: 'Comparing follows...' })
+      setProgress({ phase: 'connections', current: completed, total: totalWork, message: 'Mapping the inner circle...' })
       const sharedFollows = await computeSharedFollows(followerDids, followingDids, (done, message) => {
         setProgress({ phase: 'connections', current: completed + done, total: totalWork, message })
       })
@@ -132,7 +132,7 @@ export function useFollowerAnalysis() {
       const stats = computeStats(enrichedFollowers, followingDids)
 
       setResult({ profile, followers: enrichedFollowers, mutualDids: followingDids, stats })
-      setProgress({ phase: 'done', current: 1, total: 1, message: 'Analysis complete!' })
+      setProgress({ phase: 'done', current: 1, total: 1, message: 'All done!' })
     } catch (err: any) {
       const message = err?.message ?? 'An unknown error occurred'
       setError(message)
