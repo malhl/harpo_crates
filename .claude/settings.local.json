@@ -7,7 +7,8 @@
       "Bash(git add src/components/CategorySection.tsx src/components/FollowerDashboard.tsx src/components/FollowerList.tsx src/types/index.ts)",
       "Bash(git commit:*)",
       "Bash(npx tsc --noEmit)",
-      "Bash(npm run build)"
+      "Bash(npm run build)",
+      "Bash(git add tsconfig.app.json src/api/bluesky.ts src/test/fixtures.ts)"
     ]
   }
 }
