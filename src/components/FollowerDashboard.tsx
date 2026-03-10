@@ -28,24 +28,14 @@ export function FollowerDashboard({ result }: Props) {
         <StatCard label="Avg Posts" value={formatNumber(stats.avgPostsOfFollowers)} subtitle="per follower" />
       </div>
 
-      {/* Categories */}
-      <div>
-        <h3 className="text-sm font-semibold text-navy-faint uppercase tracking-wider mb-3">
-          Categories
-        </h3>
-        <div className="space-y-3">
-          {FOLLOWER_CATEGORIES.map(cat => (
-            <CategorySection key={cat.id} category={cat} followers={followers} />
-          ))}
-        </div>
-      </div>
-
       {/* Follower List */}
-      <div>
-        <h3 className="text-sm font-semibold text-navy-faint uppercase tracking-wider mb-3">
-          All Followers
-        </h3>
+      <div className="space-y-3">
         <FollowerList followers={followers} />
+
+        {/* Categories */}
+        {FOLLOWER_CATEGORIES.map(cat => (
+          <CategorySection key={cat.id} category={cat} followers={followers} />
+        ))}
       </div>
     </div>
   )

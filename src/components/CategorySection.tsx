@@ -16,7 +16,9 @@ export function CategorySection({ category, followers }: Props) {
   const allMatched = useMemo(() => {
     const filtered = followers.filter(category.filter)
     const sorted = [...filtered].sort((a, b) => {
-      const diff = a[category.sortKey] - b[category.sortKey]
+      const diff = category.sortFn
+        ? category.sortFn(a, b)
+        : (a[category.sortKey!] - b[category.sortKey!])
       return category.sortAsc ? diff : -diff
     })
     return sorted

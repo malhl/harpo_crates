@@ -68,7 +68,8 @@ export interface FollowerCategoryDef {
   label: string
   description: string
   filter: (f: EnrichedFollower) => boolean
-  sortKey: keyof Pick<EnrichedFollower, 'postsCount' | 'followersCount' | 'followsCount' | 'followerIndex'>
+  sortKey?: keyof Pick<EnrichedFollower, 'postsCount' | 'followersCount' | 'followsCount' | 'followerIndex'>
+  sortFn?: (a: EnrichedFollower, b: EnrichedFollower) => number
   sortAsc?: boolean
   limit?: number
 }
@@ -81,7 +82,20 @@ function accountAgeMs(f: EnrichedFollower): number {
 const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000
 const SIX_MONTHS_MS = 6 * ONE_MONTH_MS
 
+/** Returns how long ago the profile was last indexed (proxy for last activity), in ms */
+function timeSinceIndexed(f: EnrichedFollower): number {
+  return f.indexedAt ? Date.now() - new Date(f.indexedAt).getTime() : Infinity
+}
+
 export const FOLLOWER_CATEGORIES: FollowerCategoryDef[] = [
+  {
+    id: 'ghosts',
+    label: 'Ghosts',
+    description: 'No activity in 6+ months',
+    filter: (f) => timeSinceIndexed(f) > SIX_MONTHS_MS,
+    sortFn: (a, b) => new Date(a.indexedAt ?? 0).getTime() - new Date(b.indexedAt ?? 0).getTime(),
+    sortAsc: true,
+  },
   {
     id: 'lurkers',
     label: 'Lurkers',
@@ -92,7 +106,7 @@ export const FOLLOWER_CATEGORIES: FollowerCategoryDef[] = [
           || (f.postsCount < 10 && age > ONE_MONTH_MS)
     },
     sortKey: 'followerIndex',
-    sortAsc: false, // highest index = followed longest ago → shown first
+    sortAsc: false,
     limit: 50,
   },
 ]

@@ -17,6 +17,7 @@ interface Props {
 }
 
 export function FollowerList({ followers }: Props) {
+  const [open, setOpen] = useState(false)
   const [sortBy, setSortBy] = useState<SortKey>('followOrder')
   const [sortDesc, setSortDesc] = useState(true)
   const [search, setSearch] = useState('')
@@ -63,6 +64,19 @@ export function FollowerList({ followers }: Props) {
 
   return (
     <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-white rounded-lg border border-cream-dark hover:border-navy-faint transition-colors text-left"
+      >
+        <div>
+          <span className="font-medium text-navy">All Followers</span>
+          <span className="ml-2 text-sm text-navy-faint">({followers.length})</span>
+        </div>
+        <span className="text-navy-faint">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+      <div className="mt-2">
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <input
           type="text"
@@ -124,6 +138,8 @@ export function FollowerList({ followers }: Props) {
           </button>
         )}
       </div>
+      </div>
+      )}
     </div>
   )
 }
