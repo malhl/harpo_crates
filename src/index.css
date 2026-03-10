@@ -1,1 +1,18 @@
 @import "tailwindcss";
+
+@theme {
+  --color-cream: #d9d5cd;
+  --color-cream-dark: #c9c4ba;
+  --color-blue: #335588;
+  --color-blue-light: #3d6699;
+  --color-blue-faint: #e8edf3;
+  --color-navy: #334455;
+  --color-navy-light: #556677;
+  --color-navy-faint: #8899aa;
+  --color-gold: #cc9944;
+  --color-gold-light: #d9ad5e;
+  --color-gold-faint: #f5ead4;
+  --color-burgundy: #773333;
+  --color-burgundy-light: #994444;
+  --color-burgundy-faint: #f3e0e0;
+}

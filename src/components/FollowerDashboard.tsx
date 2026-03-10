@@ -30,7 +30,7 @@ export function FollowerDashboard({ result }: Props) {
 
       {/* Categories */}
       <div>
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+        <h3 className="text-sm font-semibold text-navy-faint uppercase tracking-wider mb-3">
           Categories
         </h3>
         <div className="space-y-3">
@@ -42,7 +42,7 @@ export function FollowerDashboard({ result }: Props) {
 
       {/* Follower List */}
       <div>
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+        <h3 className="text-sm font-semibold text-navy-faint uppercase tracking-wider mb-3">
           All Followers
         </h3>
         <FollowerList followers={followers} />
@@ -53,10 +53,10 @@ export function FollowerDashboard({ result }: Props) {
 
 function StatCard({ label, value, subtitle }: { label: string; value: string; subtitle?: string }) {
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4">
-      <p className="text-xs text-gray-500 uppercase tracking-wider">{label}</p>
-      <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
-      {subtitle && <p className="text-xs text-gray-400">{subtitle}</p>}
+    <div className="bg-white rounded-lg border border-cream-dark p-4">
+      <p className="text-xs text-navy-faint uppercase tracking-wider">{label}</p>
+      <p className="text-2xl font-bold text-navy mt-1">{value}</p>
+      {subtitle && <p className="text-xs text-navy-faint">{subtitle}</p>}
     </div>
   )
 }

@@ -31,7 +31,7 @@ export function ProfileSummary({ profile }: Props) {
     <div className="w-full max-w-4xl mx-auto bg-white rounded-xl shadow-sm overflow-hidden">
       {/* Banner image — only rendered if the user has one set */}
       {profile.banner && (
-        <div className="h-32 w-full bg-sky-100">
+        <div className="h-32 w-full bg-blue-faint">
           <img src={profile.banner} alt="" className="w-full h-full object-cover" />
         </div>
       )}
@@ -45,39 +45,39 @@ export function ProfileSummary({ profile }: Props) {
               className="w-20 h-20 rounded-full border-4 border-white -mt-12 shadow-md"
             />
           ) : (
-            <div className="w-20 h-20 rounded-full bg-gray-300 -mt-12 border-4 border-white shadow-md" />
+            <div className="w-20 h-20 rounded-full bg-cream-dark -mt-12 border-4 border-white shadow-md" />
           )}
           <div className="flex-1 min-w-0">
-            <h2 className="text-xl font-bold text-gray-900 truncate">
+            <h2 className="text-xl font-bold text-navy truncate">
               {profile.displayName || profile.handle}
             </h2>
-            <p className="text-sm text-gray-500">@{profile.handle}</p>
+            <p className="text-sm text-navy-faint">@{profile.handle}</p>
           </div>
         </div>
 
         {/* Bio text — whitespace-pre-wrap preserves the user's line breaks */}
         {profile.description && (
-          <p className="mt-3 text-gray-700 text-sm whitespace-pre-wrap">{profile.description}</p>
+          <p className="mt-3 text-navy-light text-sm whitespace-pre-wrap">{profile.description}</p>
         )}
 
         {/* Stats row — followers, following, posts, join date */}
         <div className="mt-4 flex flex-wrap gap-6 text-sm">
           <div>
-            <span className="font-bold text-gray-900">{formatNumber(profile.followersCount ?? 0)}</span>
-            <span className="text-gray-500 ml-1">followers</span>
+            <span className="font-bold text-navy">{formatNumber(profile.followersCount ?? 0)}</span>
+            <span className="text-navy-faint ml-1">followers</span>
           </div>
           <div>
-            <span className="font-bold text-gray-900">{formatNumber(profile.followsCount ?? 0)}</span>
-            <span className="text-gray-500 ml-1">following</span>
+            <span className="font-bold text-navy">{formatNumber(profile.followsCount ?? 0)}</span>
+            <span className="text-navy-faint ml-1">following</span>
           </div>
           <div>
-            <span className="font-bold text-gray-900">{formatNumber(profile.postsCount ?? 0)}</span>
-            <span className="text-gray-500 ml-1">posts</span>
+            <span className="font-bold text-navy">{formatNumber(profile.postsCount ?? 0)}</span>
+            <span className="text-navy-faint ml-1">posts</span>
           </div>
           {createdDate && (
             <div>
-              <span className="text-gray-500">Joined </span>
-              <span className="font-medium text-gray-700">{createdDate}</span>
+              <span className="text-navy-faint">Joined </span>
+              <span className="font-medium text-navy-light">{createdDate}</span>
             </div>
           )}
         </div>

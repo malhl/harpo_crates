@@ -10,7 +10,7 @@ import { formatNumber } from '../utils/stats'
 
 type SortKey = 'followers' | 'posts' | 'follows' | 'name' | 'followOrder'
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 52
 
 interface Props {
   followers: EnrichedFollower[]
@@ -54,7 +54,7 @@ export function FollowerList({ followers }: Props) {
     <button
       onClick={() => toggleSort(sortKey)}
       className={`text-xs px-2 py-1 rounded transition-colors ${
-        sortBy === sortKey ? 'bg-sky-100 text-sky-700 font-medium' : 'text-gray-500 hover:bg-gray-100'
+        sortBy === sortKey ? 'bg-blue-faint text-blue font-medium' : 'text-navy-faint hover:bg-cream-dark'
       }`}
     >
       {label} {sortBy === sortKey && (sortDesc ? '↓' : '↑')}
@@ -69,9 +69,9 @@ export function FollowerList({ followers }: Props) {
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="Filter followers..."
-          className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+          className="px-3 py-1.5 border border-cream-dark rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue focus:border-transparent"
         />
-        <div className="flex items-center gap-1 text-xs text-gray-500">
+        <div className="flex items-center gap-1 text-xs text-navy-faint">
           <span>Sort:</span>
           <SortButton label="Oldest" sortKey="followOrder" />
           <SortButton label="Followers" sortKey="followers" />
@@ -79,12 +79,12 @@ export function FollowerList({ followers }: Props) {
           <SortButton label="Following" sortKey="follows" />
           <SortButton label="Name" sortKey="name" />
         </div>
-        <span className="text-xs text-gray-400 ml-auto">{filtered.length} results</span>
+        <span className="text-xs text-navy-faint ml-auto">{filtered.length} results</span>
       </div>
 
       <div>
         {filtered.length === 0 && (
-          <p className="text-sm text-gray-500 text-center py-8">No followers match this filter.</p>
+          <p className="text-sm text-navy-faint text-center py-8">No followers match this filter.</p>
         )}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
           {filtered.slice(0, visibleCount).map(follower => (
@@ -93,18 +93,18 @@ export function FollowerList({ followers }: Props) {
               href={`https://bsky.app/profile/${follower.handle}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex flex-col items-center text-center p-4 bg-white rounded-lg border border-gray-100 hover:border-gray-300 hover:shadow-sm transition-all no-underline"
+              className="flex flex-col items-center text-center p-4 bg-white rounded-lg border border-cream-dark hover:border-navy-faint hover:shadow-sm transition-all no-underline"
             >
               {follower.avatar ? (
                 <img src={follower.avatar} alt="" className="w-[84px] h-[84px] rounded-full" />
               ) : (
-                <div className="w-[84px] h-[84px] rounded-full bg-gray-200" />
+                <div className="w-[84px] h-[84px] rounded-full bg-cream-dark" />
               )}
-              <span className="font-medium text-gray-900 text-sm mt-2 truncate w-full">
+              <span className="font-medium text-navy text-sm mt-2 truncate w-full">
                 {follower.displayName || follower.handle}
               </span>
-              <span className="text-xs text-gray-400 truncate w-full">@{follower.handle}</span>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-2 text-xs text-gray-500">
+              <span className="text-xs text-navy-faint truncate w-full">@{follower.handle}</span>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-2 text-xs text-navy-faint">
                 {follower.createdAt && (
                   <span className="col-span-2">Joined {new Date(follower.createdAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</span>
                 )}
@@ -118,7 +118,7 @@ export function FollowerList({ followers }: Props) {
         {filtered.length > visibleCount && (
           <button
             onClick={() => setVisibleCount(v => v + PAGE_SIZE)}
-            className="w-full mt-3 py-2 text-sm text-sky-600 hover:text-sky-700 font-medium hover:bg-sky-50 rounded-lg transition-colors"
+            className="w-full mt-3 py-2 text-sm text-blue hover:text-blue-light font-medium hover:bg-blue-faint rounded-lg transition-colors"
           >
             Show more ({visibleCount} of {filtered.length})
           </button>

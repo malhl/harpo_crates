@@ -26,15 +26,15 @@ export function LoadingProgress({ progress }: Props) {
   return (
     <div className="w-full max-w-xl mx-auto mt-6">
       {/* Status message and percentage */}
-      <div className="flex justify-between text-sm text-gray-600 mb-2">
+      <div className="flex justify-between text-sm text-navy-faint mb-2">
         <span>{progress.message}</span>
         {progress.total > 0 && <span>{percentage}%</span>}
       </div>
       {/* Progress bar track */}
-      <div className="w-full bg-gray-200 rounded-full h-2.5">
+      <div className="w-full bg-cream-dark rounded-full h-2.5">
         {/* Progress bar fill — width is animated via transition-all */}
         <div
-          className="bg-sky-500 h-2.5 rounded-full transition-all duration-300"
+          className="bg-gold h-2.5 rounded-full transition-all duration-300"
           style={{ width: `${percentage}%` }}
         />
       </div>

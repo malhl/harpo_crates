@@ -29,15 +29,15 @@ function App() {
   const loading = !['idle', 'done', 'error'].includes(progress.phase)
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-cream">
       {/* Header */}
-      <header className="bg-white border-b border-gray-200">
+      <header className="bg-navy border-b border-navy-light">
         <div className="max-w-5xl mx-auto px-4 py-6 flex flex-col items-center">
           <img src={harpoCrateLogo} alt="Harpo Crates logo" className="w-16 h-16 mb-2" />
-          <h1 className="text-2xl font-bold text-gray-900 text-center">
+          <h1 className="text-2xl font-bold text-white text-center">
             Harpo Crates
           </h1>
-          <p className="text-sm text-gray-500 text-center mt-1">
+          <p className="text-sm text-navy-faint text-center mt-1">
             Analyze any Bluesky account's followers
           </p>
         </div>
@@ -57,7 +57,7 @@ function App() {
 
         {/* Error state — shown when any step of the pipeline fails */}
         {error && (
-          <div className="max-w-xl mx-auto bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 text-sm">
+          <div className="max-w-xl mx-auto bg-burgundy-faint border border-burgundy text-burgundy rounded-lg p-4 text-sm">
             <p className="font-medium">Something went wrong</p>
             <p className="mt-1">{error}</p>
           </div>
@@ -74,10 +74,10 @@ function App() {
         {/* Empty state — shown before any search has been performed */}
         {!result && !loading && !error && (
           <div className="text-center py-16">
-            <p className="text-gray-400 text-lg">
+            <p className="text-navy-faint text-lg">
               Enter a Bluesky handle above to get started
             </p>
-            <p className="text-gray-300 text-sm mt-2">
+            <p className="text-cream-dark text-sm mt-2">
               No login required — all data is fetched from the public API
             </p>
           </div>
@@ -85,8 +85,8 @@ function App() {
       </main>
 
       {/* Footer — privacy assurance */}
-      <footer className="border-t border-gray-200 mt-16">
-        <div className="max-w-5xl mx-auto px-4 py-4 text-center text-xs text-gray-400">
+      <footer className="border-t border-cream-dark mt-16">
+        <div className="max-w-5xl mx-auto px-4 py-4 text-center text-xs text-navy-faint">
           Harpo Crates uses the public AT Protocol API. No data is stored or transmitted to any server.
         </div>
       </footer>

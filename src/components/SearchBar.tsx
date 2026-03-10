@@ -40,12 +40,12 @@ export function SearchBar({ onSearch, loading, onReset, hasResult }: Props) {
         onChange={e => setInput(e.target.value)}
         placeholder="Enter a Bluesky handle (e.g. user.bsky.social)"
         disabled={loading}
-        className="flex-1 px-4 py-3 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent disabled:opacity-50 text-sm"
+        className="flex-1 px-4 py-3 rounded-lg border border-cream-dark bg-white text-navy placeholder-navy-faint focus:outline-none focus:ring-2 focus:ring-blue focus:border-transparent disabled:opacity-50 text-sm"
       />
       <button
         type="submit"
         disabled={loading || !input.trim()}
-        className="px-6 py-3 bg-sky-500 text-white rounded-lg font-medium hover:bg-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+        className="px-6 py-3 bg-blue text-white rounded-lg font-medium hover:bg-blue-light focus:outline-none focus:ring-2 focus:ring-blue focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
       >
         {loading ? 'Analyzing...' : 'Analyze'}
       </button>
@@ -53,7 +53,7 @@ export function SearchBar({ onSearch, loading, onReset, hasResult }: Props) {
         <button
           type="button"
           onClick={onReset}
-          className="px-4 py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors text-sm"
+          className="px-4 py-3 bg-cream-dark text-navy-light rounded-lg font-medium hover:bg-cream transition-colors text-sm"
         >
           Clear
         </button>

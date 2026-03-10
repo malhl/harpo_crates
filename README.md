@@ -29,7 +29,7 @@ Open `http://localhost:5173` and enter a Bluesky handle (e.g. `user.bsky.social`
 | **React 19** | UI framework with hooks-based architecture |
 | **TypeScript** | Static type checking across the entire codebase |
 | **Vite** | Build tool, dev server, and HMR (Hot Module Replacement) |
-| **Tailwind CSS v4** | Utility-first styling via the Vite plugin |
+| **Tailwind CSS v4** | Utility-first styling via the Vite plugin with custom theme colors |
 | **@atproto/api** | Official AT Protocol SDK for type-safe Bluesky API calls |
 | **Vitest** | Unit and integration testing framework |
 | **React Testing Library** | Component testing with user-centric queries |
@@ -50,11 +50,13 @@ When you enter a Bluesky handle, Harpo Crates runs a multi-step analysis pipelin
 └─────────────┘     └──────────────────┘
 ```
 
+A single cumulative progress bar tracks overall progress across all phases, dynamically adjusting its estimate as actual counts come in from pagination.
+
 ### Step 1: Profile Lookup
 Calls `app.bsky.actor.getProfile` to fetch the target user's full profile, including avatar, banner, bio, and aggregate counts (followers, following, posts).
 
 ### Step 2: Follower Collection
-Paginates through `app.bsky.graph.getFollowers`, fetching 100 followers per API call with cursor-based pagination.
+Paginates through `app.bsky.graph.getFollowers`, fetching 100 followers per API call with cursor-based pagination. The array order is preserved to track follow order (oldest to newest).
 
 ### Step 3: Following Collection
 Fetches the target user's following list via `app.bsky.graph.getFollows` using the same pagination pattern. This is used for mutual detection.
@@ -63,7 +65,7 @@ Fetches the target user's following list via `app.bsky.graph.getFollows` using t
 The follower list from Step 2 contains lightweight `ProfileView` objects that lack follower/following/post counts. Harpo Crates batch-fetches full `ProfileViewDetailed` objects via `app.bsky.actor.getProfiles` (up to 25 per request).
 
 ### Step 5: Statistics & Dashboard
-Aggregate statistics are computed across all enriched followers, and the dashboard renders with overview cards and a sortable/filterable follower list.
+Aggregate statistics are computed across all enriched followers, and the dashboard renders with overview cards, follower categories, and a sortable/filterable tile grid.
 
 ### Rate Limiting
 A 200ms delay is inserted between every API request to stay within the public API's limit of ~3,000 requests per 5 minutes per IP.
@@ -88,15 +90,24 @@ A 200ms delay is inserted between every API request to stay within the public AP
 ### Dashboard
 
 **Overview Stats** (4 cards):
-- **Total Followers** — complete follower count
-- **Mutuals** — how many followers you follow back
-- **Avg Followers** — average follower count across your followers
-- **Avg Posts** — average post count across your followers
+- **Total Active Followers** — count of accessible followers (excludes deleted/suspended accounts)
+- **Mutuals** — how many followers the target user follows back
+- **Avg Followers** — average follower count across all followers
+- **Avg Posts** — average post count across all followers
 
-**Follower List** (scrollable, sortable, filterable):
-- Each follower shows: avatar, display name, @handle, bio snippet, follower/post/following counts
-- **Sort** by followers, posts, following count, or name (ascending/descending toggle)
+**Follower Categories**:
+- **Lurkers** — followers with <100 posts and accounts 6+ months old, or <10 posts and 1+ month old. Sorted by follow order (longest-following first). Expandable with "Show more" pagination.
+
+**All Followers** (tile grid, sortable, filterable):
+- Each follower tile shows: avatar, display name, @handle, join date, follower/following/post counts
+- Clicking a tile opens their Bluesky profile in a new tab
+- **Sort** by oldest follow, followers, posts, following count, or name (ascending/descending toggle)
 - **Text search** filters across handle, display name, and bio content
+- **"Show more" pagination** loads 52 tiles at a time
+
+### Color Palette
+
+Custom warm palette with navy, blue, gold, burgundy, and cream tones defined via Tailwind CSS v4 `@theme` configuration.
 
 ## Architecture
 
@@ -108,9 +119,10 @@ src/
 ├── components/
 │   ├── SearchBar.tsx          # Handle input form
 │   ├── ProfileSummary.tsx     # Target user's profile card
-│   ├── LoadingProgress.tsx    # Analysis progress bar
-│   ├── FollowerDashboard.tsx  # Overview stats + follower list
-│   └── FollowerList.tsx       # Sortable/filterable follower list
+│   ├── LoadingProgress.tsx    # Cumulative analysis progress bar
+│   ├── FollowerDashboard.tsx  # Overview stats + categories + follower list
+│   ├── CategorySection.tsx    # Expandable category with tile grid
+│   └── FollowerList.tsx       # Sortable/filterable follower tile grid
 │
 ├── hooks/
 │   └── useFollowerAnalysis.ts # Analysis pipeline orchestrator
@@ -119,11 +131,11 @@ src/
 │   └── stats.ts               # Statistics computation and formatting
 │
 ├── types/
-│   └── index.ts               # TypeScript type definitions
+│   └── index.ts               # TypeScript type definitions and category configs
 │
 ├── App.tsx                    # Root component
 ├── main.tsx                   # Entry point
-└── index.css                  # Tailwind CSS import
+└── index.css                  # Tailwind CSS import and custom theme
 ```
 
 ## API Reference
@@ -147,7 +159,7 @@ npm run test:coverage # Coverage report
 
 ## Planned Features
 
-- **Follower categorization** — organize followers by activity level, network relationships, and bio-based interests
+- **More follower categories** — organize followers by activity level, network relationships, and bio-based interests
 - **Deep post analysis** — fetch recent posts per follower for last-active date and content topics
 - **Engagement analysis** — identify top engagers and silent followers
 - **Growth tracking** — store snapshots in localStorage to track follower changes over time
