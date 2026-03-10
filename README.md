@@ -96,6 +96,7 @@ A 200ms delay is inserted between every API request to stay within the public AP
 - **Avg Posts** — average post count across all followers
 
 **Follower Categories**:
+- **Ghosts** — followers with no activity in 6+ months (based on profile `indexedAt`). Sorted by last activity, oldest first.
 - **Lurkers** — followers with <100 posts and accounts 6+ months old, or <10 posts and 1+ month old. Sorted by follow order (longest-following first). Expandable with "Show more" pagination.
 
 **All Followers** (tile grid, sortable, filterable):
