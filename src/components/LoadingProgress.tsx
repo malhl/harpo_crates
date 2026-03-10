@@ -30,7 +30,7 @@ function formatEstimate(seconds: number): string {
 }
 
 /** Threshold at which we lock the estimate (percentage) */
-const LOCK_THRESHOLD = 30
+const LOCK_THRESHOLD = 50
 /** If elapsed exceeds this multiple of the locked estimate, abort */
 const TIMEOUT_MULTIPLIER = 3
 
@@ -62,8 +62,8 @@ export function LoadingProgress({ progress, onTimeout }: Props) {
     }
   }, [isActive])
 
-  // Don't render anything when idle (no analysis started) or done (results showing)
-  if (progress.phase === 'idle' || progress.phase === 'done') return null
+  // Don't render anything when idle, done, or errored
+  if (progress.phase === 'idle' || progress.phase === 'done' || progress.phase === 'error') return null
 
   const percentage = progress.total > 0
     ? Math.min(100, Math.round((progress.current / progress.total) * 100))
@@ -77,9 +77,11 @@ export function LoadingProgress({ progress, onTimeout }: Props) {
   const lockedEstimate = lockedEstimateRef.current
 
   // Abort if elapsed exceeds 3x the locked estimate
-  if (lockedEstimate && elapsed > lockedEstimate * TIMEOUT_MULTIPLIER && onTimeout) {
-    onTimeout()
-  }
+  useEffect(() => {
+    if (lockedEstimate && elapsed > lockedEstimate * TIMEOUT_MULTIPLIER && onTimeout) {
+      onTimeout()
+    }
+  }, [elapsed, lockedEstimate, onTimeout])
 
   return (
     <div className="w-full max-w-xl mx-auto mt-6">
