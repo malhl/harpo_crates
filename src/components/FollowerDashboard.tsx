@@ -20,6 +20,9 @@ export function FollowerDashboard({ result }: Props) {
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
+      {/* Section header */}
+      <h2 className="text-2xl font-bold text-navy tracking-wide uppercase">Followers</h2>
+
       {/* Overview Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatCard label="Total Active Followers" value={formatNumber(stats.totalFollowers)} />

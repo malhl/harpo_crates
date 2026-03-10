@@ -38,7 +38,7 @@ function App() {
             Harpo Crates
           </h1>
           <p className="text-sm text-navy-faint text-center mt-1">
-            Analyze any Bluesky account's followers
+            Analyze Any Bluesky Account
           </p>
         </div>
       </header>
@@ -77,7 +77,7 @@ function App() {
             <p className="text-navy-faint text-lg">
               Enter a Bluesky handle above to get started
             </p>
-            <p className="text-cream-dark text-sm mt-2">
+            <p className="text-navy-faint text-sm mt-2">
               No login required — all data is fetched from the public API
             </p>
           </div>

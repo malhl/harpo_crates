@@ -78,7 +78,8 @@ The follower list from Step 2 contains lightweight `ProfileView` objects that la
 A 3-phase algorithm computes bidirectional interaction scores:
 - **Phase 1 — Incoming:** Fetches the target's posts from the last year and scores everyone who liked, replied, reposted, or quoted them (3 API calls per post, fired in parallel). The top 100 scorers become "friends."
 - **Phase 2 — Outgoing:** For each friend, fetches their posts and checks if the target liked them. Also extracts outgoing replies, quotes, and reposts from the target's feed. Up to 3 friends processed concurrently.
-- **Phase 3 — Closeness:** Combines scores using geometric mean (`sqrt(incoming × outgoing)`), which favors balanced mutual interaction. Returns the top 20.
+- **Thread Bonus:** Detects long threads where both the target and another person replied 3+ times. Each qualifying thread adds `10 × (target_extra + other_extra)` bonus points, where extras are replies beyond the 3-reply threshold.
+- **Phase 3 — Closeness:** Combines scores using geometric mean (`sqrt(incoming × outgoing)`) plus any thread bonus, which favors balanced mutual interaction. Returns the top 20.
 
 ### Step 6: Shared Follows (Inner Circle)
 For each follower, fetches their following list and counts how many accounts they follow that the target also follows. Processes 3 followers concurrently. The top 20 by overlap are displayed.
@@ -108,7 +109,7 @@ A 200ms delay is inserted between API requests, with up to 3 concurrent requests
 - **Avg Posts** — average post count across all followers
 
 **Follower Categories**:
-- **Besties** — followers you interact with most, scored by mutual likes, replies, quotes, and reposts over the last year. Uses closeness-weighted scoring that favors balanced two-way interaction. Top 20.
+- **Besties** — followers you interact with most, scored by mutual likes, replies, quotes, reposts, and long threads over the last year. Uses closeness-weighted scoring that favors balanced two-way interaction, with bonus points for deep conversation threads. Top 20.
 - **Inner Circle** — followers who share the most follows with you, ranked by how many accounts you both follow. Top 20.
 - **Ghosts** — followers with no activity in 6+ months (based on profile `indexedAt`). Sorted by last activity, oldest first.
 - **Lurkers** — followers with <100 posts and accounts 6+ months old, or <10 posts and 1+ month old. Sorted by follow order (longest-following first). Expandable with "Show more" pagination.

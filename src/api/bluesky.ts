@@ -425,13 +425,71 @@ export async function computeBestieScores(
   }
   await Promise.all(pool)
 
+  // ── Thread Bonus: Detect long threads between target and others ──
+  // Group target's replies by thread root URI
+  const targetRepliesByRoot = new Map<string, number>()
+  for (const item of targetFeedItems) {
+    const rootUri = (item.reply as any)?.root?.uri
+    if (rootUri && item.post.author.did === did) {
+      targetRepliesByRoot.set(rootUri, (targetRepliesByRoot.get(rootUri) ?? 0) + 1)
+    }
+  }
+
+  // Find roots where target replied 3+ times
+  const longThreadRoots = [...targetRepliesByRoot.entries()]
+    .filter(([, count]) => count >= 3)
+    .map(([uri, count]) => ({ uri, targetReplies: count }))
+
+  // Fetch each thread and count per-author replies
+  const threadBonus = new Map<string, number>()
+  for (let ti = 0; ti < longThreadRoots.length; ti++) {
+    const { uri, targetReplies } = longThreadRoots[ti]
+    let threadRes
+    try {
+      threadRes = await agent.getPostThread({ uri, depth: 100, parentHeight: 0 })
+    } catch { continue }
+
+    // Walk the thread tree and count replies per non-target author
+    const replyCounts = new Map<string, number>()
+    const walkThread = (node: any) => {
+      if (node?.post?.author?.did && node.post.author.did !== did) {
+        replyCounts.set(node.post.author.did, (replyCounts.get(node.post.author.did) ?? 0) + 1)
+      }
+      if (node?.replies) {
+        for (const reply of node.replies) walkThread(reply)
+      }
+    }
+    walkThread(threadRes.data.thread)
+
+    // For each person who also replied 3+ times, add 10 * (extra replies each)
+    for (const [authorDid, count] of replyCounts) {
+      if (count >= 3) {
+        const bonus = 10 * ((targetReplies - 3) + (count - 3))
+        threadBonus.set(authorDid, (threadBonus.get(authorDid) ?? 0) + bonus)
+      }
+    }
+
+    completed++
+    onProgress(completed, `Checking for long threads (${ti + 1}/${longThreadRoots.length})...`)
+    await delay(200)
+  }
+
   // ── Phase 3: Closeness-weighted combination ──
-  // Geometric mean sqrt(incoming * outgoing) favors balanced mutual interaction
+  // Geometric mean sqrt(incoming * outgoing) favors balanced mutual interaction,
+  // plus bonus points for long threads
   const combined = new Map<string, number>()
   for (const [d, incoming] of friends) {
     const outgoing = outgoingScores.get(d) ?? 0
     if (outgoing > 0) {
-      combined.set(d, Math.sqrt(incoming * outgoing))
+      combined.set(d, Math.sqrt(incoming * outgoing) + (threadBonus.get(d) ?? 0))
+    } else if (threadBonus.has(d)) {
+      combined.set(d, threadBonus.get(d)!)
+    }
+  }
+  // Also add anyone with thread bonus who wasn't in the top 100 friends
+  for (const [d, bonus] of threadBonus) {
+    if (!combined.has(d)) {
+      combined.set(d, bonus)
     }
   }
 

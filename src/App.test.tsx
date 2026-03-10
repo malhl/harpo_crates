@@ -27,7 +27,7 @@ describe('App', () => {
     mockUseFollowerAnalysis.mockReturnValue(idleState)
     render(<App />)
     expect(screen.getByText('Harpo Crates')).toBeInTheDocument()
-    expect(screen.getByText("Analyze any Bluesky account's followers")).toBeInTheDocument()
+    expect(screen.getByText("Analyze Any Bluesky Account")).toBeInTheDocument()
   })
 
   it('renders logo image', () => {
