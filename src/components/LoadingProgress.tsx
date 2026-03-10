@@ -61,10 +61,7 @@ export function LoadingProgress({ progress }: Props) {
       {/* Status message and percentage */}
       <div className="flex justify-between text-sm text-navy-faint mb-2">
         <span>{progress.message}</span>
-        <span className="flex gap-3">
-          {progress.total > 0 && <span>{percentage}%</span>}
-          <span>{formatElapsed(elapsed)}</span>
-        </span>
+        {progress.total > 0 && <span>{percentage}%</span>}
       </div>
       {/* Progress bar track */}
       <div className="w-full bg-cream-dark rounded-full h-2.5">
@@ -73,6 +70,10 @@ export function LoadingProgress({ progress }: Props) {
           className="bg-gold h-2.5 rounded-full transition-all duration-300"
           style={{ width: `${percentage}%` }}
         />
+      </div>
+      {/* Elapsed time below the bar */}
+      <div className="text-xs text-navy-faint text-center mt-2">
+        {formatElapsed(elapsed)}
       </div>
     </div>
   )

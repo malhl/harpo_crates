@@ -384,19 +384,24 @@ export async function computeBestieScores(
         }
       }
 
-      // Check likes on all posts from this page in parallel
-      const likeResults = await Promise.allSettled(
-        postUris.map(uri => agent.getLikes({ uri, limit: 100 }))
-      )
-      for (const res of likeResults) {
-        if (res.status === 'fulfilled') {
-          for (const like of res.value.data.likes) {
-            if (like.actor.did === did) {
-              addScore(outgoingScores, friendDid, WEIGHTS.like)
-              break
+      // Check likes in small batches to avoid overwhelming the browser
+      const LIKE_BATCH = 5
+      for (let li = 0; li < postUris.length; li += LIKE_BATCH) {
+        const batch = postUris.slice(li, li + LIKE_BATCH)
+        const likeResults = await Promise.allSettled(
+          batch.map(uri => agent.getLikes({ uri, limit: 100 }))
+        )
+        for (const res of likeResults) {
+          if (res.status === 'fulfilled') {
+            for (const like of res.value.data.likes) {
+              if (like.actor.did === did) {
+                addScore(outgoingScores, friendDid, WEIGHTS.like)
+                break
+              }
             }
           }
         }
+        if (li + LIKE_BATCH < postUris.length) await delay(200)
       }
 
       friendCursor = feedRes.data.cursor
