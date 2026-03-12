@@ -90,16 +90,11 @@ function accountAgeMs(f: EnrichedFollower): number {
 const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000
 const SIX_MONTHS_MS = 6 * ONE_MONTH_MS
 
-/** Returns how long ago the profile was last indexed (proxy for last activity), in ms */
-function timeSinceIndexed(f: EnrichedFollower): number {
-  return f.indexedAt ? Date.now() - new Date(f.indexedAt).getTime() : Infinity
-}
-
 export const FOLLOWER_CATEGORIES: FollowerCategoryDef[] = [
   {
     id: 'besties',
     label: 'Besties',
-    description: 'Followers you interact with most — scored by mutual likes, replies, quotes & reposts over the last year',
+    description: 'Followers you interact with most — scored by mutual replies, quotes & reposts over the last 6 months',
     filter: (f) => f.interactionScore > 0,
     sortFn: (a, b) => a.interactionScore - b.interactionScore,
     sortAsc: false, // highest score first
@@ -114,18 +109,11 @@ export const FOLLOWER_CATEGORIES: FollowerCategoryDef[] = [
     limit: 20,
   },
   {
-    id: 'ghosts',
-    label: 'Ghosts',
-    description: 'No activity in 6+ months',
-    filter: (f) => timeSinceIndexed(f) > SIX_MONTHS_MS,
-    sortFn: (a, b) => new Date(a.indexedAt ?? 0).getTime() - new Date(b.indexedAt ?? 0).getTime(),
-    sortAsc: true,
-  },
-  {
     id: 'lurkers',
     label: 'Lurkers',
     description: '<100 posts & 6+ months old, or <10 posts & 1+ month old',
     filter: (f) => {
+      if (f.interactionScore > 0) return false
       const age = accountAgeMs(f)
       return (f.postsCount < 100 && age > SIX_MONTHS_MS)
           || (f.postsCount < 10 && age > ONE_MONTH_MS)

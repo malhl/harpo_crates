@@ -16,7 +16,8 @@
  */
 
 import { Agent } from '@atproto/api'
-import type { ProfileViewDetailed, ProfileView } from '../types'
+import type { ProfileViewDetailed } from '../types'
+import { debugLog } from '../utils/debug'
 
 /**
  * Singleton AT Protocol agent configured to use the public (unauthenticated)
@@ -69,22 +70,31 @@ export async function getProfile(handle: string): Promise<ProfileViewDetailed> {
  * @param onProgress - Called after each page with (loaded, total) counts
  * @returns Array of ProfileView objects (lightweight profiles without full stats)
  */
+/** Slim follower record — only the fields we actually use downstream */
+export interface SlimProfile {
+  did: string
+  handle: string
+  displayName?: string
+  avatar?: string
+  description?: string
+}
+
 export async function getAllFollowers(
   handle: string,
   onProgress: (loaded: number, total: number) => void,
-): Promise<ProfileView[]> {
-  const followers: ProfileView[] = []
+): Promise<SlimProfile[]> {
+  const followers: SlimProfile[] = []
   let cursor: string | undefined
 
   do {
     const res = await agent.getFollowers({ actor: handle, limit: 100, cursor })
-    followers.push(...res.data.followers)
-    // Use the subject's followersCount as the total estimate for the progress bar.
-    // Fall back to the current loaded count if the count isn't available.
+    for (const f of res.data.followers) {
+      followers.push({ did: f.did, handle: f.handle, displayName: f.displayName, avatar: f.avatar, description: f.description })
+    }
     const total = (res.data.subject as any).followersCount ?? followers.length
     onProgress(followers.length, total)
     cursor = res.data.cursor
-    if (cursor) await delay(200) // Rate limit: wait between pages
+    if (cursor) await delay(200)
   } while (cursor)
 
   return followers
@@ -104,20 +114,22 @@ export async function getAllFollowers(
 export async function getAllFollowing(
   handle: string,
   onProgress: (loaded: number, total: number) => void,
-): Promise<ProfileView[]> {
-  const following: ProfileView[] = []
+): Promise<string[]> {
+  const dids: string[] = []
   let cursor: string | undefined
 
   do {
     const res = await agent.getFollows({ actor: handle, limit: 100, cursor })
-    following.push(...res.data.follows)
-    const total = (res.data.subject as any).followsCount ?? following.length
-    onProgress(following.length, total)
+    for (const f of res.data.follows) {
+      dids.push(f.did)
+    }
+    const total = (res.data.subject as any).followsCount ?? dids.length
+    onProgress(dids.length, total)
     cursor = res.data.cursor
     if (cursor) await delay(200)
   } while (cursor)
 
-  return following
+  return dids
 }
 
 /**
@@ -133,20 +145,41 @@ export async function getAllFollowing(
  * @param onProgress - Called after each batch with (loaded, total) counts
  * @returns Map from DID → ProfileViewDetailed for quick lookup during categorization
  */
+/** Slim enriched data — only the stats fields we actually need */
+export interface SlimEnriched {
+  displayName?: string
+  avatar?: string
+  description?: string
+  followersCount: number
+  followsCount: number
+  postsCount: number
+  createdAt?: string
+  indexedAt?: string
+}
+
 export async function enrichProfiles(
   dids: string[],
   onProgress: (loaded: number, total: number) => void,
   isAborted?: IsAborted,
-): Promise<Map<string, ProfileViewDetailed>> {
-  const profiles = new Map<string, ProfileViewDetailed>()
-  const batchSize = 25 // Maximum allowed by the getProfiles endpoint
+): Promise<Map<string, SlimEnriched>> {
+  const profiles = new Map<string, SlimEnriched>()
+  const batchSize = 25
 
   for (let i = 0; i < dids.length; i += batchSize) {
     checkAborted(isAborted)
     const batch = dids.slice(i, i + batchSize)
     const res = await agent.getProfiles({ actors: batch })
-    for (const profile of res.data.profiles) {
-      profiles.set(profile.did, profile)
+    for (const p of res.data.profiles) {
+      profiles.set(p.did, {
+        displayName: p.displayName,
+        avatar: p.avatar,
+        description: p.description,
+        followersCount: p.followersCount ?? 0,
+        followsCount: p.followsCount ?? 0,
+        postsCount: p.postsCount ?? 0,
+        createdAt: p.createdAt,
+        indexedAt: p.indexedAt,
+      })
     }
     onProgress(Math.min(i + batchSize, dids.length), dids.length)
     if (i + batchSize < dids.length) await delay(200)
@@ -175,17 +208,22 @@ export async function computeSharedFollows(
   let pagesDone = 0
   let followersDone = 0
   const CONCURRENCY = 3
+  const MAX_PAGES_PER_MUTUAL = 30 // Cap at ~3000 follows checked per mutual
 
   const processFollower = async (followerDid: string) => {
     let count = 0
     let cursor: string | undefined
+    let pages = 0
 
     do {
       checkAborted(isAborted)
       let res
       try {
         res = await agent.getFollows({ actor: followerDid, limit: 100, cursor })
-      } catch { break }
+      } catch (err: any) {
+        debugLog('error:getFollows', { actor: followerDid, message: err?.message })
+        break
+      }
 
       for (const follow of res.data.follows) {
         if (targetFollowingDids.has(follow.did)) {
@@ -194,8 +232,9 @@ export async function computeSharedFollows(
       }
 
       pagesDone++
+      pages++
       cursor = res.data.cursor
-      if (!cursor) break
+      if (!cursor || pages >= MAX_PAGES_PER_MUTUAL) break
       await delay(200)
     } while (true)
 
@@ -206,7 +245,6 @@ export async function computeSharedFollows(
     onProgress(pagesDone, `Seeing who runs in the same circles (${followersDone}/${followerDids.length})...`)
   }
 
-  // Run through a concurrency pool
   const pool: Promise<void>[] = []
   for (const did of followerDids) {
     const p = processFollower(did)
@@ -230,11 +268,11 @@ const WEIGHTS = { like: 1, repost: 2, reply: 3, quote: 3 }
 /**
  * Computes bidirectional interaction scores using a 3-phase algorithm:
  *
- * Phase 1 — Incoming: Fetch the target's posts from the last year and score
- * everyone who liked, replied, reposted, or quote-posted them. Take the top
- * 100 scorers as "friends."
+ * Phase 1 — Incoming: Fetch the target's posts from the last 6 months and score
+ * everyone who replied, reposted, or quote-posted them. (Likes are skipped here
+ * as the weakest signal to reduce API calls.) Take the top 100 scorers as "friends."
  *
- * Phase 2 — Outgoing: For each friend, fetch their posts from the last year
+ * Phase 2 — Outgoing: For each friend, fetch their posts from the last 6 months
  * and score based on how much the target replied, reposted, quote-posted, or
  * liked those friends' posts.
  *
@@ -250,9 +288,9 @@ export async function computeBestieScores(
   did: string,
   onProgress: (completed: number, message: string) => void,
   isAborted?: IsAborted,
-): Promise<Map<string, number>> {
+): Promise<{ scores: Map<string, number>; interactedDids: Set<string> }> {
   let completed = 0
-  const ONE_YEAR_AGO = Date.now() - 365 * 24 * 60 * 60 * 1000
+  const SIX_MONTHS_AGO = Date.now() - 183 * 24 * 60 * 60 * 1000
 
   const addScore = (map: Map<string, number>, d: string, points: number) => {
     if (d && d !== did) map.set(d, (map.get(d) ?? 0) + points)
@@ -260,8 +298,18 @@ export async function computeBestieScores(
 
   // ── Phase 1: Incoming — score everyone who interacted with the target ──
 
-  // 1a. Fetch target's feed for the last year to collect their post URIs
-  const targetFeedItems: any[] = []
+  // 1a. Fetch target's feed for the last 6 months.
+  // We extract only the fields we need to avoid holding full API responses in memory.
+  interface SlimFeedItem {
+    postUri: string
+    authorDid: string
+    isRepost: boolean
+    replyParentDid?: string
+    embedType?: string
+    quotedDid?: string
+    rootUri?: string
+  }
+  const targetFeedItems: SlimFeedItem[] = []
   let cursor: string | undefined
   let reachedCutoff = false
 
@@ -275,11 +323,29 @@ export async function computeBestieScores(
     })
     for (const item of res.data.feed) {
       const postDate = new Date(item.post.indexedAt).getTime()
-      if (postDate < ONE_YEAR_AGO) {
+      if (postDate < SIX_MONTHS_AGO) {
         reachedCutoff = true
         break
       }
-      targetFeedItems.push(item)
+      const embed = item.post.embed as any
+      let embedType: string | undefined
+      let quotedDid: string | undefined
+      if (embed?.$type === 'app.bsky.embed.record#view') {
+        embedType = embed.$type
+        quotedDid = embed.record?.author?.did
+      } else if (embed?.$type === 'app.bsky.embed.recordWithMedia#view') {
+        embedType = embed.$type
+        quotedDid = embed.record?.record?.author?.did
+      }
+      targetFeedItems.push({
+        postUri: item.post.uri,
+        authorDid: item.post.author.did,
+        isRepost: !!item.reason,
+        replyParentDid: (item.reply as any)?.parent?.author?.did,
+        embedType,
+        quotedDid,
+        rootUri: (item.reply as any)?.root?.uri,
+      })
     }
     cursor = res.data.cursor
     completed++
@@ -291,13 +357,14 @@ export async function computeBestieScores(
   // Collect target's original post URIs (not reposts)
   const targetPostUris: string[] = []
   for (const item of targetFeedItems) {
-    if (item.post.author.did === did && !item.reason) {
-      targetPostUris.push(item.post.uri)
+    if (item.authorDid === did && !item.isRepost) {
+      targetPostUris.push(item.postUri)
     }
   }
 
-  // 1b. For each target post, fetch who liked, replied, and reposted it
-  // Process posts in small batches to avoid overwhelming the browser
+  // 1b. For each target post, fetch who replied and reposted it.
+  // Likes are skipped here (weight=1, weakest signal) to cut API calls by 1/3.
+  // Likes are still checked in Phase 2b for outgoing scoring.
   const incomingScores = new Map<string, number>()
   const POST_BATCH = 3
 
@@ -307,23 +374,16 @@ export async function computeBestieScores(
 
     const batchResults = await Promise.allSettled(
       batch.flatMap(uri => [
-        agent.getLikes({ uri, limit: 100 }),
         agent.getPostThread({ uri, depth: 1, parentHeight: 0 }),
         agent.getRepostedBy({ uri, limit: 100 }),
       ])
     )
 
-    // Process results in groups of 3 (likes, thread, reposts per post)
+    // Process results in groups of 2 (thread, reposts per post)
     for (let bi = 0; bi < batch.length; bi++) {
-      const likesRes = batchResults[bi * 3]
-      const threadRes = batchResults[bi * 3 + 1]
-      const repostsRes = batchResults[bi * 3 + 2]
+      const threadRes = batchResults[bi * 2]
+      const repostsRes = batchResults[bi * 2 + 1]
 
-      if (likesRes.status === 'fulfilled') {
-        for (const like of (likesRes.value as any).data.likes) {
-          addScore(incomingScores, like.actor.did, WEIGHTS.like)
-        }
-      }
       if (threadRes.status === 'fulfilled') {
         const thread = (threadRes.value as any).data.thread
         if (thread?.replies) {
@@ -339,7 +399,7 @@ export async function computeBestieScores(
       }
     }
 
-    completed += batch.length * 3 // 3 API calls per post (getLikes + getPostThread + getRepostedBy)
+    completed += batch.length * 2
     onProgress(completed, `Seeing who shows up (${Math.min(pi + POST_BATCH, targetPostUris.length)}/${targetPostUris.length} posts)...`)
     if (pi + POST_BATCH < targetPostUris.length) await delay(200)
   }
@@ -356,46 +416,41 @@ export async function computeBestieScores(
 
   // 2a. Extract outgoing replies, quotes, and reposts from the target's feed (already fetched)
   for (const item of targetFeedItems) {
-    const parentDid = (item.reply as any)?.parent?.author?.did
-    if (parentDid && friendDids.has(parentDid)) {
-      addScore(outgoingScores, parentDid, WEIGHTS.reply)
+    if (item.replyParentDid && friendDids.has(item.replyParentDid)) {
+      addScore(outgoingScores, item.replyParentDid, WEIGHTS.reply)
     }
 
-    const embed = item.post.embed as any
-    if (embed?.$type === 'app.bsky.embed.record#view') {
-      const quotedDid = embed.record?.author?.did
-      if (quotedDid && friendDids.has(quotedDid)) {
-        addScore(outgoingScores, quotedDid, WEIGHTS.quote)
-      }
-    }
-    if (embed?.$type === 'app.bsky.embed.recordWithMedia#view') {
-      const quotedDid = embed.record?.record?.author?.did
-      if (quotedDid && friendDids.has(quotedDid)) {
-        addScore(outgoingScores, quotedDid, WEIGHTS.quote)
-      }
+    if (item.quotedDid && friendDids.has(item.quotedDid)) {
+      addScore(outgoingScores, item.quotedDid, WEIGHTS.quote)
     }
 
-    if (item.reason?.$type === 'app.bsky.feed.defs#reasonRepost') {
-      const repostedDid = item.post.author.did
-      if (friendDids.has(repostedDid)) {
-        addScore(outgoingScores, repostedDid, WEIGHTS.repost)
-      }
+    if (item.isRepost && friendDids.has(item.authorDid)) {
+      addScore(outgoingScores, item.authorDid, WEIGHTS.repost)
     }
   }
 
+  // Pre-compute thread data before clearing targetFeedItems
+  const targetRepliesByRoot = new Map<string, number>()
+  for (const item of targetFeedItems) {
+    if (item.rootUri && item.authorDid === did) {
+      targetRepliesByRoot.set(item.rootUri, (targetRepliesByRoot.get(item.rootUri) ?? 0) + 1)
+    }
+  }
+
+  // Free the feed items array — no longer needed
+  targetFeedItems.length = 0
+
   // 2b. For each friend, fetch their posts and check getLikes for the target's outgoing likes
-  // Process up to 3 friends concurrently to stay within rate limits
-  const CONCURRENCY = 3
+  // Process friends fully sequentially — one at a time to limit peak memory
   let friendsDone = 0
 
-  const processFriend = async (friendDid: string) => {
+  for (const [friendDid] of friends) {
     let friendCursor: string | undefined
     let friendCutoff = false
 
     do {
       checkAborted(isAborted)
       let feedRes
-      let pageCalls = 1 // 1 getAuthorFeed call
       try {
         feedRes = await agent.getAuthorFeed({
           actor: friendDid,
@@ -403,13 +458,17 @@ export async function computeBestieScores(
           cursor: friendCursor,
           filter: 'posts_no_replies',
         })
-      } catch { break }
+      } catch (err: any) {
+        debugLog('error:getAuthorFeed', { actor: friendDid, message: err?.message })
+        break
+      }
+      completed++ // getAuthorFeed call
 
       // Collect post URIs from this page that need like-checking
       const postUris: string[] = []
       for (const item of feedRes.data.feed) {
         const postDate = new Date(item.post.indexedAt).getTime()
-        if (postDate < ONE_YEAR_AGO) {
+        if (postDate < SIX_MONTHS_AGO) {
           friendCutoff = true
           break
         }
@@ -418,11 +477,12 @@ export async function computeBestieScores(
         }
       }
 
-      // Check likes in small batches to avoid overwhelming the browser
+      friendCursor = feedRes.data.cursor
+
+      // Check likes in batches of 5
       const LIKE_BATCH = 5
       for (let li = 0; li < postUris.length; li += LIKE_BATCH) {
         const batch = postUris.slice(li, li + LIKE_BATCH)
-        pageCalls += batch.length // each getLikes = 1 API call
         const likeResults = await Promise.allSettled(
           batch.map(uri => agent.getLikes({ uri, limit: 100 }))
         )
@@ -436,11 +496,10 @@ export async function computeBestieScores(
             }
           }
         }
+        completed += batch.length
         if (li + LIKE_BATCH < postUris.length) await delay(200)
       }
 
-      friendCursor = feedRes.data.cursor
-      completed += pageCalls
       onProgress(completed, `Checking if the love goes both ways (${friendsDone + 1}/${friends.length})...`)
       if (!friendCursor || friendCutoff) break
       await delay(200)
@@ -448,32 +507,8 @@ export async function computeBestieScores(
     friendsDone++
   }
 
-  // Run friends through a concurrency pool
-  const friendQueue = friends.map(([d]) => d)
-  const pool: Promise<void>[] = []
-  for (const friendDid of friendQueue) {
-    const p = processFriend(friendDid)
-    pool.push(p)
-    if (pool.length >= CONCURRENCY) {
-      await Promise.race(pool)
-      // Remove settled promises from the pool
-      for (let i = pool.length - 1; i >= 0; i--) {
-        const settled = await Promise.race([pool[i].then(() => true), Promise.resolve(false)])
-        if (settled) pool.splice(i, 1)
-      }
-    }
-  }
-  await Promise.all(pool)
-
   // ── Thread Bonus: Detect long threads between target and others ──
-  // Group target's replies by thread root URI
-  const targetRepliesByRoot = new Map<string, number>()
-  for (const item of targetFeedItems) {
-    const rootUri = (item.reply as any)?.root?.uri
-    if (rootUri && item.post.author.did === did) {
-      targetRepliesByRoot.set(rootUri, (targetRepliesByRoot.get(rootUri) ?? 0) + 1)
-    }
-  }
+  // (targetRepliesByRoot was pre-computed above before clearing targetFeedItems)
 
   // Find roots where target replied 3+ times
   const longThreadRoots = [...targetRepliesByRoot.entries()]
@@ -488,7 +523,10 @@ export async function computeBestieScores(
     let threadRes
     try {
       threadRes = await agent.getPostThread({ uri, depth: 100, parentHeight: 0 })
-    } catch { continue }
+    } catch (err: any) {
+      debugLog('error:getPostThread', { uri, message: err?.message })
+      continue
+    }
 
     // Walk the thread tree and count replies per non-target author
     const replyCounts = new Map<string, number>()
@@ -535,5 +573,9 @@ export async function computeBestieScores(
   }
 
   const sorted = [...combined.entries()].sort((a, b) => b[1] - a[1])
-  return new Map(sorted.slice(0, 20))
+
+  // Return top 20 scores for display, plus all DIDs that had any interaction
+  // with the target in the last 6 months (used to exclude them from ghosts)
+  const interactedDids = new Set(incomingScores.keys())
+  return { scores: new Map(sorted.slice(0, 20)), interactedDids }
 }

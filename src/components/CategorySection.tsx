@@ -21,7 +21,7 @@ export function CategorySection({ category, followers }: Props) {
         : (a[category.sortKey!] - b[category.sortKey!])
       return category.sortAsc ? diff : -diff
     })
-    return sorted
+    return category.limit ? sorted.slice(0, category.limit) : sorted
   }, [followers, category])
 
   const total = allMatched.length
