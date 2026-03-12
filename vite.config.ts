@@ -37,5 +37,6 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), debugLogPlugin()],
   define: {
     __BUILD_DATE__: JSON.stringify(new Date().toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })),
+    __APP_VERSION__: JSON.stringify(JSON.parse(fs.readFileSync('package.json', 'utf-8')).version),
   },
 })

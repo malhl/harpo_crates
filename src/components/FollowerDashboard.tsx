@@ -15,13 +15,25 @@ interface Props {
   result: AnalysisResult
 }
 
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return s > 0 ? `${m}m ${s}s` : `${m}m`
+}
+
 export function FollowerDashboard({ result }: Props) {
   const { stats, followers } = result
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
       {/* Section header */}
-      <h2 className="text-2xl font-bold text-navy tracking-wide uppercase">Followers</h2>
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-2xl font-bold text-navy tracking-wide uppercase">Followers</h2>
+        <p className="text-xs text-navy-faint">
+          Completed in {formatDuration(result.elapsedSeconds)} · {result.apiCalls.toLocaleString()} API calls
+        </p>
+      </div>
 
       {/* Overview Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

@@ -1,0 +1,30 @@
+#!/bin/bash
+# Require that package.json version was bumped compared to the merge target.
+# This runs before the merge commit is created.
+
+MERGE_HEAD=$(cat .git/MERGE_HEAD 2>/dev/null)
+if [ -z "$MERGE_HEAD" ]; then
+  exit 0
+fi
+
+# Get version from the branch being merged into (current HEAD before merge)
+BASE_VERSION=$(git show HEAD:package.json 2>/dev/null | grep '"version"' | sed 's/.*"version": *"\([^"]*\)".*/\1/')
+# Get version from the incoming branch
+INCOMING_VERSION=$(git show "$MERGE_HEAD":package.json 2>/dev/null | grep '"version"' | sed 's/.*"version": *"\([^"]*\)".*/\1/')
+
+if [ -z "$INCOMING_VERSION" ]; then
+  echo "ERROR: Could not read version from incoming branch."
+  exit 1
+fi
+
+if [ "$BASE_VERSION" = "$INCOMING_VERSION" ]; then
+  echo ""
+  echo "ERROR: Version not bumped."
+  echo "  Current version:  $BASE_VERSION"
+  echo "  Incoming version: $INCOMING_VERSION"
+  echo ""
+  echo "Bump the version in package.json before merging."
+  exit 1
+fi
+
+echo "Version bump OK: $BASE_VERSION -> $INCOMING_VERSION"

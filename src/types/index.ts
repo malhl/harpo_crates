@@ -59,6 +59,10 @@ export interface AnalysisResult {
   followers: EnrichedFollower[]
   mutualDids: Set<string>
   stats: FollowerStats
+  /** How long the analysis took, in seconds */
+  elapsedSeconds: number
+  /** Total API calls made during the analysis */
+  apiCalls: number
 }
 
 /**
