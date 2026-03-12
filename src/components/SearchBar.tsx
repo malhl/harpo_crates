@@ -38,7 +38,7 @@ export function SearchBar({ onSearch, loading, onReset, hasResult }: Props) {
         type="text"
         value={input}
         onChange={e => setInput(e.target.value)}
-        placeholder="Enter a Bluesky handle (e.g. user.bsky.social)"
+        placeholder="Enter full handle (e.g. my-username.bsky.social, not just my-username)"
         disabled={loading}
         className="flex-1 px-4 py-3 rounded-lg border border-cream-dark bg-white text-navy placeholder-navy-faint focus:outline-none focus:ring-2 focus:ring-blue focus:border-transparent disabled:opacity-50 text-sm"
       />
