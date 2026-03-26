@@ -21,6 +21,7 @@ import { SearchBar } from './components/SearchBar'
 import { LoadingProgress } from './components/LoadingProgress'
 import { ProfileSummary } from './components/ProfileSummary'
 import { FollowerDashboard } from './components/FollowerDashboard'
+import { LocationGuess } from './components/LocationGuess'
 import { useFollowerAnalysis } from './hooks/useFollowerAnalysis'
 
 function App() {
@@ -67,6 +68,7 @@ function App() {
         {result && (
           <div className="space-y-8">
             <ProfileSummary profile={result.profile} />
+            <LocationGuess handle={result.profile.handle} />
             <FollowerDashboard result={result} />
           </div>
         )}

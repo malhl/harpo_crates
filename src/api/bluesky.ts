@@ -262,6 +262,47 @@ export async function computeSharedFollows(
   return sharedCounts
 }
 
+/**
+ * Fetches up to `maxPages` pages of posts for location inference.
+ * Returns the post texts and their timestamps (indexedAt).
+ */
+export async function fetchPostsForLocation(
+  handle: string,
+  onProgress: (loaded: number) => void,
+  maxPages = 10,
+): Promise<{ texts: string[]; timestamps: string[] }> {
+  const texts: string[] = []
+  const timestamps: string[] = []
+  let cursor: string | undefined
+  let pages = 0
+
+  do {
+    const res = await agent.getAuthorFeed({
+      actor: handle,
+      limit: 100,
+      cursor,
+      filter: 'posts_and_author_threads',
+    })
+    for (const item of res.data.feed) {
+      // Only include the user's own posts (skip reposts)
+      if (item.post.author.handle === handle || item.post.author.did === handle) {
+        const record = item.post.record as any
+        if (record?.text) {
+          texts.push(record.text)
+          timestamps.push(item.post.indexedAt)
+        }
+      }
+    }
+    pages++
+    onProgress(texts.length)
+    cursor = res.data.cursor
+    if (!cursor || pages >= maxPages) break
+    await delay(200)
+  } while (true)
+
+  return { texts, timestamps }
+}
+
 /** Scoring weights for interaction types */
 const WEIGHTS = { like: 1, repost: 2, reply: 3, quote: 3 }
 
