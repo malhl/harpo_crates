@@ -55,7 +55,7 @@ export function useFollowerAnalysis() {
 
         const estFollowers = profile.followersCount ?? 0
         const estFollowing = profile.followsCount ?? 0
-        const estTotal = estFollowers + estFollowing
+
 
         setProgress({ phase: 'followers', current: 5, total: 100, message: 'Rounding up followers...' })
         const followers = await getAllFollowers(handle, (loaded) => {
