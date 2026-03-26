@@ -6,13 +6,13 @@
  *   - besties:      profile → followers → following → enrich → interactions → stats
  *   - inner-circle: profile → followers → following → enrich → connections → stats
  *   - lurkers:      profile → followers → following → enrich → stats
- *   - location:     profile only (LocationGuess component handles the rest)
+ *   - location:     profile → followers → following → location scan (bios only, no enrichment)
  *
  * Progress uses a weighted virtual scale (0–1000) adapted to the active steps.
  */
 
 import { useState, useCallback, useRef } from 'react'
-import { getProfile, getAllFollowers, getAllFollowing, enrichProfiles, computeBestieScores, computeSharedFollows, type IsAborted } from '../api/bluesky'
+import { getProfile, getAllFollowers, getAllFollowing, getAllFollowingProfiles, enrichProfiles, computeBestieScores, computeSharedFollows, type IsAborted } from '../api/bluesky'
 import { computeStats } from '../utils/stats'
 import { debugLog } from '../utils/debug'
 import type { AnalysisMode, AnalysisProgress, AnalysisResult, EnrichedFollower } from '../types'
@@ -46,7 +46,7 @@ export function useFollowerAnalysis() {
 
     let currentPhase: AnalysisProgress['phase'] = 'profile'
 
-    // Location mode: fetch profile + followers (slim profiles include bios for location parsing)
+    // Location mode: fetch profile + followers + following (slim profiles with bios for location parsing)
     if (analysisMode === 'location') {
       try {
         setProgress({ phase: 'profile', current: 0, total: 100, message: 'Looking them up...' })
@@ -54,12 +54,26 @@ export function useFollowerAnalysis() {
         let totalApiCalls = 1
 
         const estFollowers = profile.followersCount ?? 0
-        setProgress({ phase: 'followers', current: 10, total: 100, message: 'Rounding up followers...' })
+        const estFollowing = profile.followsCount ?? 0
+        const estTotal = estFollowers + estFollowing
+
+        setProgress({ phase: 'followers', current: 5, total: 100, message: 'Rounding up followers...' })
         const followers = await getAllFollowers(handle, (loaded) => {
-          const pct = Math.min(90, 10 + Math.round((loaded / Math.max(estFollowers, 1)) * 80))
+          const pct = Math.min(50, 5 + Math.round((loaded / Math.max(estFollowers, 1)) * 45))
           setProgress({ phase: 'followers', current: pct, total: 100, message: `Rounding up followers (${loaded}/${estFollowers})...` })
         })
         totalApiCalls += Math.ceil(followers.length / 100) || 1
+
+        setProgress({ phase: 'following', current: 55, total: 100, message: 'Checking who they follow...' })
+        const following = await getAllFollowingProfiles(handle, (loaded) => {
+          const pct = Math.min(95, 55 + Math.round((loaded / Math.max(estFollowing, 1)) * 40))
+          setProgress({ phase: 'following', current: pct, total: 100, message: `Checking who they follow (${loaded}/${estFollowing})...` })
+        })
+        totalApiCalls += Math.ceil(following.length / 100) || 1
+
+        // Build DID sets for relationship detection
+        const followerDids = new Set(followers.map(f => f.did))
+        const followingDids = new Set(following.map(f => f.did))
 
         // Map slim followers to EnrichedFollower shape (stats will be zero since we skip enrichment)
         const enrichedFollowers: EnrichedFollower[] = followers.map((f, i) => ({
@@ -76,14 +90,35 @@ export function useFollowerAnalysis() {
           sharedFollowsCount: 0,
         }))
 
+        // Add following-only profiles (not already in followers)
+        const enrichedFollowing: EnrichedFollower[] = following
+          .filter(f => !followerDids.has(f.did))
+          .map((f, i) => ({
+            did: f.did,
+            handle: f.handle,
+            displayName: f.displayName || '',
+            avatar: f.avatar,
+            description: f.description,
+            followersCount: 0,
+            followsCount: 0,
+            postsCount: 0,
+            followerIndex: followers.length + i,
+            interactionScore: 0,
+            sharedFollowsCount: 0,
+          }))
+
+        const allProfiles = [...enrichedFollowers, ...enrichedFollowing]
+
         const elapsedSeconds = Math.round((Date.now() - startTime) / 1000)
         setResult({
           profile,
-          followers: enrichedFollowers,
+          followers: allProfiles,
           mutualDids: new Set(),
           stats: { totalFollowers: followers.length, totalMutuals: 0, avgFollowersOfFollowers: 0, avgPostsOfFollowers: 0 },
           elapsedSeconds,
           apiCalls: totalApiCalls,
+          followerDids,
+          followingDids,
         })
         setProgress({ phase: 'done', current: 100, total: 100, message: 'All done!' })
       } catch (err: any) {

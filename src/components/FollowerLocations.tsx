@@ -3,8 +3,10 @@
  *
  * Scans all follower bios for location signals and displays a ranked
  * breakdown of where followers are posting from, using the same tile
- * layout as other dashboard categories. Paged by follower-count bands
- * (e.g. "50+", "20–49", "10–19", etc.) computed to yield ~10 pages.
+ * layout as other dashboard categories. Paged by follower-count bands.
+ *
+ * Tiles are color-coded by relationship (follower / following / mutual).
+ * A radio menu lets users group by most specific location, region, or country.
  */
 
 import { useMemo, useState } from 'react'
@@ -13,6 +15,8 @@ import type { EnrichedFollower } from '../types'
 
 interface Props {
   followers: EnrichedFollower[]
+  followerDids?: Set<string>
+  followingDids?: Set<string>
 }
 
 interface Band {
@@ -21,7 +25,53 @@ interface Band {
   max: number
 }
 
+type Relationship = 'follower' | 'following' | 'mutual'
+type Grouping = 'specific' | 'region' | 'country'
+
 const TILE_PAGE_SIZE = 52
+
+const GROUPING_OPTIONS: { value: Grouping; label: string }[] = [
+  { value: 'specific', label: 'Most Specific' },
+  { value: 'region', label: 'Region' },
+  { value: 'country', label: 'Country' },
+]
+
+/** Roll up a location string to the requested grouping level.
+ *  "Seattle, WA, US" → region: "WA, US", country: "US"
+ *  "London, UK"       → region: "UK",    country: "UK"
+ *  "California, US"   → region: "California, US", country: "US"
+ */
+function groupLocation(location: string, grouping: Grouping): string {
+  if (grouping === 'specific') return location
+  const parts = location.split(',').map(s => s.trim())
+  if (grouping === 'country') return parts[parts.length - 1]
+  // region: drop the first part (city) if there are 3+ parts, otherwise keep as-is
+  if (parts.length >= 3) return parts.slice(1).join(', ')
+  return parts.length >= 2 ? parts.slice(-2).join(', ') : location
+}
+
+/** Re-aggregate scan results at a different grouping level */
+function regroupResult(result: FollowerLocationResult, grouping: Grouping): FollowerLocationResult {
+  if (grouping === 'specific') return result
+
+  const grouped = new Map<string, string[]>()
+  let detected = 0
+
+  for (const [location, handles] of result.locations) {
+    const key = groupLocation(location, grouping)
+    const list = grouped.get(key) ?? []
+    list.push(...handles)
+    grouped.set(key, list)
+  }
+
+  for (const handles of grouped.values()) detected += handles.length
+
+  const ranked = [...grouped.entries()]
+    .map(([loc, handles]) => [loc, handles.length] as [string, number])
+    .sort((a, b) => b[1] - a[1])
+
+  return { locations: grouped, ranked, detected, total: result.total }
+}
 
 /** Compute ~10 count bands from the data */
 function computeBands(ranked: [string, number][]): Band[] {
@@ -30,11 +80,9 @@ function computeBands(ranked: [string, number][]): Band[] {
   const min = ranked[ranked.length - 1][1]
   if (max === min) return [{ label: `${max}`, min: max, max }]
 
-  // Try "nice" thresholds that produce readable labels
   const nice = [500, 200, 100, 50, 20, 10, 5, 3, 2, 1]
   const thresholds = nice.filter(n => n <= max)
 
-  // Build bands from thresholds
   const bands: Band[] = []
   for (let i = 0; i < thresholds.length; i++) {
     const lo = thresholds[i]
@@ -46,7 +94,6 @@ function computeBands(ranked: [string, number][]): Band[] {
     }
   }
 
-  // If we got too many bands (>12), merge the smallest ones
   while (bands.length > 12) {
     const last = bands.pop()!
     const prev = bands[bands.length - 1]
@@ -57,14 +104,46 @@ function computeBands(ranked: [string, number][]): Band[] {
   return bands
 }
 
-export function FollowerLocations({ followers }: Props) {
+function getRelationship(did: string, followerDids?: Set<string>, followingDids?: Set<string>): Relationship | null {
+  const isFollower = followerDids?.has(did) ?? false
+  const isFollowing = followingDids?.has(did) ?? false
+  if (isFollower && isFollowing) return 'mutual'
+  if (isFollowing) return 'following'
+  if (isFollower) return 'follower'
+  return null
+}
+
+const REL_STYLES: Record<Relationship, { border: string; bg: string }> = {
+  follower:  { border: 'border-teal',   bg: 'bg-teal-faint' },
+  following: { border: 'border-coral',   bg: 'bg-coral-faint' },
+  mutual:    { border: 'border-violet',  bg: 'bg-violet-faint' },
+}
+
+function tileClasses(did: string, followerDids?: Set<string>, followingDids?: Set<string>): string {
+  const rel = getRelationship(did, followerDids, followingDids)
+  if (rel) {
+    const s = REL_STYLES[rel]
+    return `border-2 ${s.border} ${s.bg}`
+  }
+  return 'border border-cream-dark bg-white'
+}
+
+export function FollowerLocations({ followers, followerDids, followingDids }: Props) {
   const [activeBand, setActiveBand] = useState(0)
   const [expandedLocation, setExpandedLocation] = useState<string | null>(null)
   const [tileCounts, setTileCounts] = useState<Record<string, number>>({})
+  const [grouping, setGrouping] = useState<Grouping>('specific')
 
-  const result: FollowerLocationResult = useMemo(
+  const hasRelData = !!(followerDids || followingDids)
+
+  const rawResult: FollowerLocationResult = useMemo(
     () => scanFollowerLocations(followers),
     [followers],
+  )
+
+  const result = useMemo(
+    () => regroupResult(rawResult, grouping),
+    [rawResult, grouping],
   )
 
   const followersByHandle = useMemo(() => {
@@ -78,7 +157,8 @@ export function FollowerLocations({ followers }: Props) {
   const detectedPct = result.total > 0 ? Math.round((result.detected / result.total) * 100) : 0
   const maxCount = result.ranked[0]?.[1] ?? 1
 
-  const currentBand = bands[activeBand]
+  const safeBand = activeBand < bands.length ? activeBand : 0
+  const currentBand = bands[safeBand]
   const bandLocations = currentBand
     ? result.ranked.filter(([, count]) => count >= currentBand.min && count <= currentBand.max)
     : []
@@ -86,10 +166,44 @@ export function FollowerLocations({ followers }: Props) {
   return (
     <div className="w-full max-w-4xl mx-auto space-y-4">
       <div className="flex items-baseline justify-between">
-        <h2 className="text-2xl font-bold text-navy tracking-wide uppercase">Follower Locations</h2>
+        <h2 className="text-2xl font-bold text-navy tracking-wide uppercase">Locals</h2>
         <p className="text-xs text-navy-faint">
-          {result.detected} of {result.total} followers ({detectedPct}%) have a detectable location
+          {result.detected} of {result.total} accounts ({detectedPct}%) have a detectable location
         </p>
+      </div>
+
+      {/* Legend + grouping controls */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {hasRelData && (
+          <div className="flex gap-4 text-xs">
+            {([
+              ['follower', 'Follows you', 'bg-teal-faint border-teal'],
+              ['following', 'You follow', 'bg-coral-faint border-coral'],
+              ['mutual', 'Mutual', 'bg-violet-faint border-violet'],
+            ] as [Relationship, string, string][]).map(([, label, cls]) => (
+              <span key={label} className="flex items-center gap-1.5">
+                <span className={`w-3.5 h-3.5 rounded border-2 ${cls} inline-block`} />
+                <span className="text-navy-faint font-medium">{label}</span>
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-1 bg-white rounded-full border border-cream-dark p-0.5">
+          {GROUPING_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => { setGrouping(opt.value); setActiveBand(0); setExpandedLocation(null) }}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors cursor-pointer ${
+                grouping === opt.value
+                  ? 'bg-blue text-white'
+                  : 'text-navy-faint hover:text-navy'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {result.ranked.length === 0 ? (
@@ -105,13 +219,13 @@ export function FollowerLocations({ followers }: Props) {
           {bands.length > 1 && (
             <div className="flex flex-wrap gap-1.5">
               {bands.map((band, i) => {
-                const count = result.ranked.filter(([, c]) => c >= band.min && c <= band.max).length
+                const count = result.ranked.filter(([, c]) => c >= band.min && c <= band.max).reduce((sum, [, c]) => sum + c, 0)
                 return (
                   <button
                     key={band.label}
                     onClick={() => { setActiveBand(i); setExpandedLocation(null) }}
                     className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
-                      activeBand === i
+                      safeBand === i
                         ? 'bg-blue text-white'
                         : 'bg-white border border-cream-dark text-navy-faint hover:border-navy-faint'
                     }`}
@@ -161,7 +275,7 @@ export function FollowerLocations({ followers }: Props) {
                               href={`https://bsky.app/profile/${follower.handle}`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="flex flex-col items-center text-center p-4 bg-white rounded-lg border border-cream-dark hover:border-navy-faint hover:shadow-sm transition-all no-underline"
+                              className={`flex flex-col items-center text-center p-4 rounded-lg ${tileClasses(follower.did, followerDids, followingDids)} hover:shadow-sm transition-all no-underline`}
                             >
                               {follower.avatar ? (
                                 <img src={follower.avatar} alt="" className="w-[84px] h-[84px] rounded-full" />

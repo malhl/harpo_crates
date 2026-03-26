@@ -70,8 +70,8 @@ const BIO_PATTERNS: RegExp[] = [
   /📍\s*(.+)/i,
   /(?:based|located|living|residing)\s+(?:in|out of)\s+(.+)/i,
   /(?:from|hailing from)\s+(.+)/i,
-  /(?:^|\n)([A-Z][a-z]+(?:\s[A-Z][a-z]+)*,\s*[A-Z]{2})\b/m,           // "Austin, TX"
-  /(?:^|\n)([A-Z][a-z]+(?:\s[A-Z][a-z]+)*,\s*[A-Z][a-z]+(?:\s[A-Z][a-z]+)*)\b/m, // "London, England"
+  /(?:^|\n)([A-Z][a-z]+(?:\s[A-Z][a-z]+){0,2},\s*[A-Z]{2})\b/m,           // "Austin, TX" (max 3-word city)
+  /(?:^|\n)([A-Z][a-z]+(?:\s[A-Z][a-z]+){0,2},\s*[A-Z][a-z]+(?:\s[A-Z][a-z]+){0,2})\b/m, // "London, England" (max 3-word city)
 ]
 
 export function parseLocationFromBio(bio: string): LocationSignal[] {
@@ -448,6 +448,17 @@ const BIO_ALIASES = new Map<string, string>([
   ['atl', 'Atlanta, US'], ['pdx', 'Portland, US'], ['phx', 'Phoenix, US'],
   ['slc', 'Salt Lake City, US'], ['stl', 'St. Louis, US'],
   ['dtx', 'Dallas, US'], ['dfw', 'Dallas, US'],
+  ['sea', 'Seattle, US'], ['chi', 'Chicago, US'], ['phl', 'Philadelphia, US'],
+  ['pgh', 'Pittsburgh, US'], ['msp', 'Minneapolis, US'], ['mpls', 'Minneapolis, US'],
+  ['atx', 'Austin, US'], ['pit', 'Pittsburgh, US'], ['bham', 'Birmingham, US'],
+  ['st louis', 'St. Louis, US'], ['saint louis', 'St. Louis, US'],
+  ['dc', 'Washington DC, US'], ['dmv', 'Washington DC, US'], ['washington dc', 'Washington DC, US'],
+  ['pnw', 'Pacific Northwest, US'], ['the pnw', 'Pacific Northwest, US'],
+  ['bay area', 'San Francisco, US'], ['the bay area', 'San Francisco, US'],
+  ['sf bay area', 'San Francisco, US'], ['sf bay', 'San Francisco, US'],
+  ['socal', 'Southern California, US'], ['norcal', 'Northern California, US'],
+  ['philly', 'Philadelphia, US'],
+  ['new england', 'New England, US'],
   // US state abbreviations — only those that aren't common English words.
   // Omitted: in, or, al, la, ma, oh, pa, co, mi, va, ga, md, me, hi, ok, id
   // These still work when written as "City, ST" via STATE_ABBREVS + normalizeLocation().
@@ -462,89 +473,160 @@ const BIO_ALIASES = new Map<string, string>([
   ['england', 'United Kingdom'], ['scotland', 'United Kingdom'], ['wales', 'United Kingdom'],
   ['usa', 'United States'], ['the us', 'United States'], ['america', 'United States'],
   ['brasil', 'Brazil'], ['deutschland', 'Germany'], ['españa', 'Spain'],
+  ['italia', 'Italy'], ['türkiye', 'Turkey'],
 ])
 
-/** Map "City, ST" patterns to their normalized form — e.g. "Seattle, WA" → "Seattle, US" */
-const STATE_ABBREVS = new Map<string, string>([
-  ['wa', 'Seattle'], ['or', 'Portland'], ['ca', 'Los Angeles'], ['tx', 'Houston'],
-  ['fl', 'Miami'], ['ny', 'New York'], ['il', 'Chicago'], ['oh', 'Cleveland'],
-  ['pa', 'Philadelphia'], ['co', 'Denver'], ['mn', 'Minneapolis'], ['ga', 'Atlanta'],
-  ['mi', 'Detroit'], ['va', 'Richmond'], ['nc', 'Charlotte'], ['ma', 'Boston'],
-  ['nj', 'New Jersey, US'], ['ct', 'Connecticut, US'], ['wi', 'Milwaukee'],
-  ['md', 'Baltimore'], ['tn', 'Nashville'], ['mo', 'St. Louis'], ['az', 'Phoenix'],
-  ['nv', 'Las Vegas'], ['ut', 'Salt Lake City'],
+/** US state / Canadian province abbreviation → [full name, country code] */
+const STATE_FULL_NAMES = new Map<string, [string, string]>([
+  // US states
+  ['al', ['Alabama', 'US']], ['ak', ['Alaska', 'US']], ['az', ['Arizona', 'US']],
+  ['ar', ['Arkansas', 'US']], ['ca', ['California', 'US']], ['co', ['Colorado', 'US']],
+  ['ct', ['Connecticut', 'US']], ['de', ['Delaware', 'US']], ['dc', ['District of Columbia', 'US']],
+  ['fl', ['Florida', 'US']], ['ga', ['Georgia', 'US']], ['hi', ['Hawaii', 'US']],
+  ['id', ['Idaho', 'US']], ['il', ['Illinois', 'US']], ['in', ['Indiana', 'US']],
+  ['ia', ['Iowa', 'US']], ['ks', ['Kansas', 'US']], ['ky', ['Kentucky', 'US']],
+  ['la', ['Louisiana', 'US']], ['me', ['Maine', 'US']], ['md', ['Maryland', 'US']],
+  ['ma', ['Massachusetts', 'US']], ['mi', ['Michigan', 'US']], ['mn', ['Minnesota', 'US']],
+  ['ms', ['Mississippi', 'US']], ['mo', ['Missouri', 'US']], ['mt', ['Montana', 'US']],
+  ['ne', ['Nebraska', 'US']], ['nv', ['Nevada', 'US']], ['nh', ['New Hampshire', 'US']],
+  ['nj', ['New Jersey', 'US']], ['nm', ['New Mexico', 'US']], ['ny', ['New York', 'US']],
+  ['nc', ['North Carolina', 'US']], ['nd', ['North Dakota', 'US']], ['oh', ['Ohio', 'US']],
+  ['ok', ['Oklahoma', 'US']], ['or', ['Oregon', 'US']], ['pa', ['Pennsylvania', 'US']],
+  ['ri', ['Rhode Island', 'US']], ['sc', ['South Carolina', 'US']], ['sd', ['South Dakota', 'US']],
+  ['tn', ['Tennessee', 'US']], ['tx', ['Texas', 'US']], ['ut', ['Utah', 'US']],
+  ['vt', ['Vermont', 'US']], ['va', ['Virginia', 'US']], ['wa', ['Washington', 'US']],
+  ['wv', ['West Virginia', 'US']], ['wi', ['Wisconsin', 'US']], ['wy', ['Wyoming', 'US']],
+  // Canadian provinces
+  ['ab', ['Alberta', 'Canada']], ['bc', ['British Columbia', 'Canada']],
+  ['mb', ['Manitoba', 'Canada']], ['nb', ['New Brunswick', 'Canada']],
+  ['nl', ['Newfoundland and Labrador', 'Canada']], ['ns', ['Nova Scotia', 'Canada']],
+  ['on', ['Ontario', 'Canada']], ['pe', ['Prince Edward Island', 'Canada']],
+  ['qc', ['Quebec', 'Canada']], ['sk', ['Saskatchewan', 'Canada']],
 ])
 
-/** Expand "City, Country" to "City, State/Province, Country" for display */
+/** Expand "City, US" to "City, State, United States" — full names, no abbreviations */
 const STATE_PROVINCE_MAP = new Map<string, string>([
   // US cities
-  ['New York, US', 'New York, NY, US'], ['Los Angeles, US', 'Los Angeles, CA, US'],
-  ['Chicago, US', 'Chicago, IL, US'], ['Houston, US', 'Houston, TX, US'],
-  ['Phoenix, US', 'Phoenix, AZ, US'], ['Philadelphia, US', 'Philadelphia, PA, US'],
-  ['San Antonio, US', 'San Antonio, TX, US'], ['San Diego, US', 'San Diego, CA, US'],
-  ['Dallas, US', 'Dallas, TX, US'], ['Austin, US', 'Austin, TX, US'],
-  ['San Francisco, US', 'San Francisco, CA, US'], ['Seattle, US', 'Seattle, WA, US'],
-  ['Denver, US', 'Denver, CO, US'], ['Boston, US', 'Boston, MA, US'],
-  ['Nashville, US', 'Nashville, TN, US'], ['Portland, US', 'Portland, OR, US'],
-  ['Las Vegas, US', 'Las Vegas, NV, US'], ['Atlanta, US', 'Atlanta, GA, US'],
-  ['Miami, US', 'Miami, FL, US'], ['Minneapolis, US', 'Minneapolis, MN, US'],
-  ['Detroit, US', 'Detroit, MI, US'], ['Pittsburgh, US', 'Pittsburgh, PA, US'],
-  ['Baltimore, US', 'Baltimore, MD, US'], ['Milwaukee, US', 'Milwaukee, WI, US'],
-  ['Cleveland, US', 'Cleveland, OH, US'], ['St. Louis, US', 'St. Louis, MO, US'],
-  ['Tampa, US', 'Tampa, FL, US'], ['Orlando, US', 'Orlando, FL, US'],
-  ['Sacramento, US', 'Sacramento, CA, US'], ['Raleigh, US', 'Raleigh, NC, US'],
-  ['Charlotte, US', 'Charlotte, NC, US'], ['Salt Lake City, US', 'Salt Lake City, UT, US'],
-  ['Richmond, US', 'Richmond, VA, US'], ['Olympia, US', 'Olympia, WA, US'],
-  ['Tacoma, US', 'Tacoma, WA, US'], ['Spokane, US', 'Spokane, WA, US'],
-  ['Boise, US', 'Boise, ID, US'], ['Eugene, US', 'Eugene, OR, US'],
-  ['Bend, US', 'Bend, OR, US'], ['Honolulu, US', 'Honolulu, HI, US'],
-  ['Anchorage, US', 'Anchorage, AK, US'],
+  ['New York, US', 'New York, New York, United States'], ['Los Angeles, US', 'Los Angeles, California, United States'],
+  ['Chicago, US', 'Chicago, Illinois, United States'], ['Houston, US', 'Houston, Texas, United States'],
+  ['Phoenix, US', 'Phoenix, Arizona, United States'], ['Philadelphia, US', 'Philadelphia, Pennsylvania, United States'],
+  ['San Antonio, US', 'San Antonio, Texas, United States'], ['San Diego, US', 'San Diego, California, United States'],
+  ['Dallas, US', 'Dallas, Texas, United States'], ['Austin, US', 'Austin, Texas, United States'],
+  ['San Francisco, US', 'San Francisco, California, United States'], ['Seattle, US', 'Seattle, Washington, United States'],
+  ['Denver, US', 'Denver, Colorado, United States'], ['Boston, US', 'Boston, Massachusetts, United States'],
+  ['Nashville, US', 'Nashville, Tennessee, United States'], ['Portland, US', 'Portland, Oregon, United States'],
+  ['Las Vegas, US', 'Las Vegas, Nevada, United States'], ['Atlanta, US', 'Atlanta, Georgia, United States'],
+  ['Miami, US', 'Miami, Florida, United States'], ['Minneapolis, US', 'Minneapolis, Minnesota, United States'],
+  ['Detroit, US', 'Detroit, Michigan, United States'], ['Pittsburgh, US', 'Pittsburgh, Pennsylvania, United States'],
+  ['Baltimore, US', 'Baltimore, Maryland, United States'], ['Milwaukee, US', 'Milwaukee, Wisconsin, United States'],
+  ['Cleveland, US', 'Cleveland, Ohio, United States'], ['St. Louis, US', 'St. Louis, Missouri, United States'],
+  ['Tampa, US', 'Tampa, Florida, United States'], ['Orlando, US', 'Orlando, Florida, United States'],
+  ['Sacramento, US', 'Sacramento, California, United States'], ['Raleigh, US', 'Raleigh, North Carolina, United States'],
+  ['Charlotte, US', 'Charlotte, North Carolina, United States'], ['Salt Lake City, US', 'Salt Lake City, Utah, United States'],
+  ['Richmond, US', 'Richmond, Virginia, United States'], ['Olympia, US', 'Olympia, Washington, United States'],
+  ['Tacoma, US', 'Tacoma, Washington, United States'], ['Spokane, US', 'Spokane, Washington, United States'],
+  ['Boise, US', 'Boise, Idaho, United States'], ['Eugene, US', 'Eugene, Oregon, United States'],
+  ['Bend, US', 'Bend, Oregon, United States'], ['Honolulu, US', 'Honolulu, Hawaii, United States'],
+  ['Anchorage, US', 'Anchorage, Alaska, United States'],
+  ['Birmingham, US', 'Birmingham, Alabama, United States'],
+  ['Washington DC, US', 'Washington DC, United States'],
+  ['Pacific Northwest, US', 'Pacific Northwest, United States'],
+  ['Southern California, US', 'Southern California, United States'],
+  ['Northern California, US', 'Northern California, United States'],
+  ['New England, US', 'New England, United States'],
   // Canada
-  ['Toronto, Canada', 'Toronto, ON, Canada'], ['Vancouver, Canada', 'Vancouver, BC, Canada'],
-  ['Montreal, Canada', 'Montreal, QC, Canada'], ['Ottawa, Canada', 'Ottawa, ON, Canada'],
-  ['Calgary, Canada', 'Calgary, AB, Canada'], ['Edmonton, Canada', 'Edmonton, AB, Canada'],
-  ['Halifax, Canada', 'Halifax, NS, Canada'],
+  ['Toronto, Canada', 'Toronto, Ontario, Canada'], ['Vancouver, Canada', 'Vancouver, British Columbia, Canada'],
+  ['Montreal, Canada', 'Montreal, Quebec, Canada'], ['Ottawa, Canada', 'Ottawa, Ontario, Canada'],
+  ['Calgary, Canada', 'Calgary, Alberta, Canada'], ['Edmonton, Canada', 'Edmonton, Alberta, Canada'],
+  ['Halifax, Canada', 'Halifax, Nova Scotia, Canada'],
   // Australia
-  ['Sydney, Australia', 'Sydney, NSW, Australia'], ['Melbourne, Australia', 'Melbourne, VIC, Australia'],
-  ['Brisbane, Australia', 'Brisbane, QLD, Australia'], ['Perth, Australia', 'Perth, WA, Australia'],
+  ['Sydney, Australia', 'Sydney, New South Wales, Australia'], ['Melbourne, Australia', 'Melbourne, Victoria, Australia'],
+  ['Brisbane, Australia', 'Brisbane, Queensland, Australia'], ['Perth, Australia', 'Perth, Western Australia, Australia'],
 ])
 
-function expandStateProvince(location: string): string {
-  return STATE_PROVINCE_MAP.get(location) ?? location
+/** Final display expansion: all abbreviations → full names */
+function expandLocation(location: string): string {
+  // First check the full city→state→country map
+  const mapped = STATE_PROVINCE_MAP.get(location)
+  if (mapped) return mapped
+
+  // Expand trailing country abbreviations: ", US" / ", UK" → full name
+  return location
+    .replace(/, US$/, ', United States')
+    .replace(/, UK$/, ', United Kingdom')
+}
+
+/** Check if a text contains a known city keyword and return the canonical location */
+function scanTextForCity(text: string): string | null {
+  if (!text) return null
+  const lower = text.toLowerCase()
+  for (const [keyword, loc] of CITY_NAMES) {
+    if (keyword.length <= 4) {
+      if (new RegExp(`\\b${keyword}\\b`, 'i').test(text)) return loc
+    } else if (lower.includes(keyword)) return loc
+  }
+  return null
+}
+
+/** States/countries are broad; cities are specific. A city result is more specific than a state/country. */
+const BROAD_LOCATIONS = new Set([
+  'California, US', 'Texas, US', 'Florida, US', 'Massachusetts, US', 'Pennsylvania, US',
+  'Illinois, US', 'Ohio, US', 'Georgia, US', 'Michigan, US', 'Virginia, US',
+  'Washington, US', 'Colorado, US', 'Minnesota, US', 'Wisconsin, US', 'Oregon, US',
+  'Connecticut, US', 'New Jersey, US', 'Arizona, US', 'Nevada, US', 'North Carolina, US',
+  'Tennessee, US', 'Kentucky, US', 'South Carolina, US', 'Utah, US',
+  'Pacific Northwest, US', 'Southern California, US', 'Northern California, US', 'New England, US',
+  'United Kingdom', 'United States', 'Brazil', 'Germany', 'Spain', 'Italy', 'France',
+  'Ireland', 'Portugal', 'Turkey', 'Japan', 'South Korea', 'Australia', 'Canada', 'Mexico',
+])
+
+function isMoreSpecific(candidate: string, current: string): boolean {
+  return BROAD_LOCATIONS.has(current) && !BROAD_LOCATIONS.has(candidate)
 }
 
 /**
- * Scans an array of follower bios for location signals.
- * Uses bio regex patterns first, then falls back to keyword matching.
- * Returns aggregated location data.
+ * Scans an array of follower bios and display names for location signals.
+ * Uses bio regex patterns first, then display name city matching, then
+ * falls back to keyword matching. Returns aggregated location data.
  */
 export function scanFollowerLocations(
-  followers: { handle: string; description?: string }[],
+  followers: { handle: string; displayName?: string; description?: string }[],
 ): FollowerLocationResult {
   const locations = new Map<string, string[]>()
   let detected = 0
 
   for (const f of followers) {
     const bio = f.description
-    if (!bio) continue
+    const name = f.displayName ?? ''
+    if (!bio && !name) continue
 
     let location: string | null = null
 
     // Try structured bio patterns first (most reliable)
-    for (const pattern of BIO_PATTERNS) {
-      const match = bio.match(pattern)
-      if (match?.[1]) {
-        const raw = match[1].split('\n')[0].trim().replace(/[.!|·•—–\-🏳🌈]+$/, '').trim()
-        if (raw.length > 1 && raw.length < 80) {
-          // Try to normalize against known locations
-          location = normalizeLocation(raw)
-          break
+    if (bio) {
+      for (const pattern of BIO_PATTERNS) {
+        const match = bio.match(pattern)
+        if (match?.[1]) {
+          const raw = match[1].split('\n')[0].trim().replace(/[.!|·•—–\-🏳🌈]+$/, '').trim()
+          if (raw.length > 1 && raw.length < 80) {
+            const normalized = normalizeLocation(raw)
+            if (normalized) { location = normalized; break }
+          }
         }
       }
     }
 
+    // Also check display name for city keywords (can refine a broad bio match)
+    const nameCity = scanTextForCity(name)
+    if (nameCity) {
+      // If bio gave a broad region (state/country) but name has a specific city, prefer the city
+      if (!location || isMoreSpecific(nameCity, location)) {
+        location = nameCity
+      }
+    }
+
     // Fall back: scan bio for known city/country names and aliases
-    if (!location) {
+    if (!location && bio) {
       const bioLower = bio.toLowerCase()
       // Check city names first (more specific than aliases)
       for (const [keyword, loc] of CITY_NAMES) {
@@ -571,7 +653,7 @@ export function scanFollowerLocations(
 
     if (location) {
       detected++
-      const display = expandStateProvince(location)
+      const display = expandLocation(location)
       const list = locations.get(display) ?? []
       list.push(f.handle)
       locations.set(display, list)
@@ -585,27 +667,48 @@ export function scanFollowerLocations(
   return { locations, ranked, detected, total: followers.length }
 }
 
-/** Try to normalize a free-text location against known cities/regions */
-function normalizeLocation(raw: string): string {
-  const lower = raw.toLowerCase().trim()
+/** Try to normalize a free-text location against known cities/regions.
+ *  Returns null if the text can't be matched to any known location. */
+function normalizeLocation(raw: string): string | null {
+  // Strip common prefixes that aren't part of location names
+  const cleaned = raw.replace(/^(?:from|near|outside(?:\s+of)?|originally\s+from|born\s+in|raised\s+in|moved\s+to|living\s+in|based\s+in)\s+/i, '').trim()
+  const lower = cleaned.toLowerCase()
 
   // Check aliases first (ATL, PDX, UK, etc.)
   const alias = BIO_ALIASES.get(lower)
   if (alias) return alias
 
   // "City, ST" pattern — e.g. "Seattle, WA" or "Portland, OR"
-  const cityStateMatch = raw.match(/^([A-Za-z\s.'-]+),\s*([A-Z]{2})$/i)
+  const cityStateMatch = cleaned.match(/^([A-Za-z\s.'-]+),\s*([A-Z]{2})$/i)
   if (cityStateMatch) {
     const city = cityStateMatch[1].trim()
     const state = cityStateMatch[2].toLowerCase()
-    // Try to find the city in our known locations
     const cityLower = city.toLowerCase()
+
+    // Reject if "city" has too many words — real cities are 1-3 words
+    if (city.split(/\s+/).length > 3) return null
+
+    // Check if the city part is a known alias (e.g. "Bay Area, CA" → San Francisco)
+    const cityAlias = BIO_ALIASES.get(cityLower)
+    if (cityAlias) return cityAlias
+
+    // Normalize "St " → "St. " for consistency (St Louis → St. Louis)
+    const normalizedCity = city.replace(/^St\s+/i, 'St. ')
+
+    // Try to find the city in our known locations
     for (const [keyword, location] of CITY_NAMES) {
-      if (keyword === cityLower) return location
+      if (keyword === normalizedCity.toLowerCase()) return location
     }
-    // If city not found but state is valid, return "City, US"
-    if (STATE_ABBREVS.has(state)) {
-      return `${city}, US`
+
+    // Reject vague/directional "city" names that aren't real places
+    if (/^(?:north|south|east|west|central|upper|lower|greater|northern|southern|eastern|western)\b/i.test(city)) {
+      // Fall through to other matching strategies instead of building "Western, State, US"
+    } else {
+      // If city not found but state is a valid abbreviation, build "City, StateName, CountryCode"
+      const stateInfo = STATE_FULL_NAMES.get(state)
+      if (stateInfo) {
+        return `${city}, ${stateInfo[0]}, ${stateInfo[1]}`
+      }
     }
   }
 
@@ -616,13 +719,20 @@ function normalizeLocation(raw: string): string {
     }
   }
 
-  // Check if the raw text contains a known city
+  // Check if the text contains a known city (5+ chars to avoid false positives)
   for (const [keyword, location] of CITY_NAMES) {
     if (keyword.length >= 5 && lower.includes(keyword)) {
       return location
     }
   }
 
-  // Return as-is if we can't normalize (still useful for display)
-  return raw
+  // Check aliases within the text (handles "PNW usa", "central NJ", etc.)
+  for (const [alias, loc] of BIO_ALIASES) {
+    if (new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(cleaned)) {
+      return loc
+    }
+  }
+
+  // Not a recognized location — return null to avoid garbage
+  return null
 }

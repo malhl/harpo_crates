@@ -74,6 +74,10 @@ export interface AnalysisResult {
   elapsedSeconds: number
   /** Total API calls made during the analysis */
   apiCalls: number
+  /** DIDs of accounts that follow the target (location mode) */
+  followerDids?: Set<string>
+  /** DIDs of accounts the target follows (location mode) */
+  followingDids?: Set<string>
 }
 
 /**

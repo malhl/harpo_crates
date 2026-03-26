@@ -133,6 +133,31 @@ export async function getAllFollowing(
 }
 
 /**
+ * Like getAllFollowing but returns SlimProfile objects (with bios) instead of bare DIDs.
+ * Used by location mode to scan following-list bios for location signals.
+ */
+export async function getAllFollowingProfiles(
+  handle: string,
+  onProgress: (loaded: number, total: number) => void,
+): Promise<SlimProfile[]> {
+  const profiles: SlimProfile[] = []
+  let cursor: string | undefined
+
+  do {
+    const res = await agent.getFollows({ actor: handle, limit: 100, cursor })
+    for (const f of res.data.follows) {
+      profiles.push({ did: f.did, handle: f.handle, displayName: f.displayName, avatar: f.avatar, description: f.description })
+    }
+    const total = (res.data.subject as any).followsCount ?? profiles.length
+    onProgress(profiles.length, total)
+    cursor = res.data.cursor
+    if (cursor) await delay(200)
+  } while (cursor)
+
+  return profiles
+}
+
+/**
  * Enriches a list of follower profiles by fetching their full ProfileViewDetailed
  * data (which includes follower/following/post counts that aren't available
  * in the lighter ProfileView returned by getFollowers).
