@@ -125,7 +125,7 @@ export function useFollowerAnalysis() {
             setProgress({ phase: 'enriching', current: 96, total: 100, message: `Searching for people in ${detectedCity}...` })
             const { profiles: nearbyRaw, apiCalls: nearbyCalls } = await searchNearbyActors(
               searchTerms, 5,
-              (found, msg) => setProgress({ phase: 'enriching', current: 96, total: 100, message: msg }),
+              (_found, msg) => setProgress({ phase: 'enriching', current: 96, total: 100, message: msg }),
               isAborted,
             )
             totalApiCalls += nearbyCalls
