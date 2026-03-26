@@ -43,7 +43,7 @@ Choose an analysis mode before searching to control which pipeline steps run:
 | **Full Analysis** | Full Analysis | Runs the complete pipeline: profile, followers, following, enrichment, interactions, shared follows, and stats |
 | **Besties** | Besties | Profile + followers + following + enrichment + interaction scoring (skips shared follows) |
 | **Inner Circle** | Inner Circle | Profile + followers + following + enrichment + shared follows (skips interactions) |
-| **Locals** | Locals | Profile + followers only — scans all follower bios for location signals and displays an aggregate geographic breakdown |
+| **Locals** | Locals | Profile + followers + following — scans all bios and display names for location signals, shows aggregate geographic breakdown with relationship coloring |
 | **Lurkers** | Lurkers | Profile + followers + following + enrichment only (skips both interactions and shared follows) |
 
 Each mode skips unnecessary heavy API steps, so lighter modes like Locals complete much faster than a Full Analysis.
@@ -137,20 +137,28 @@ A 200ms delay is inserted between API requests, with up to 3 concurrent requests
 
 ### Locals (Follower Location Breakdown)
 
-Scans all follower bios for location signals and displays a ranked geographic breakdown:
+Scans both follower and following bios and display names for location signals, displaying a ranked geographic breakdown:
 
 - **Detection methods** (in priority order):
   1. **Bio patterns** — "Based in...", "Living in...", "📍", "City, ST" formats
-  2. **City keyword matching** — recognizes 100+ major cities worldwide
-  3. **Alias matching** — abbreviations like ATL, PDX, UK, etc.
-- **Normalization** — merges variants ("Seattle, WA" + "Seattle" → "Seattle, WA, US") with state/province labels for US, Canadian, and Australian cities
+  2. **Display name scanning** — detects city names in display names, preferring specific cities over broad regions from bios
+  3. **City keyword matching** — recognizes 100+ major cities worldwide
+  4. **Alias matching** — abbreviations like ATL, PDX, PNW, DMV, Bay Area, SoCal, etc.
+- **Normalization** — full unabbreviated names (e.g. "Seattle, Washington, United States"), merging variants via prefix stripping ("From Pittsburgh" → "Pittsburgh"), directional rejection, and St./St normalization
+- **Garbage rejection** — `normalizeLocation()` returns null for unrecognized text; word count limits and blocklists prevent non-location strings from leaking through
+- **All 50 US states + DC + Canadian provinces** — unknown cities with valid state abbreviations get proper state names (e.g. "Clearwater, FL" → "Clearwater, Florida, United States")
+- **Grouping** — radio menu to view by Most Specific location, Region (state/province), or Country
+- **Relationship coloring** — tiles color-coded by relationship: teal (follows you), coral (you follow), violet (mutual)
 - **Count-based band paging** — locations grouped into ~10 pages by follower count (e.g. "50+", "20–49", "10–19")
 - **Expandable tiles** — click any location to see follower tiles (avatar, name, handle) sorted alphabetically
 - **Proportional bars** — each location row shows a background bar scaled relative to the top location
 
 ### Color Palette
 
-Custom warm palette with navy, blue, gold, burgundy, and cream tones defined via Tailwind CSS v4 `@theme` configuration.
+Custom warm palette defined via Tailwind CSS v4 `@theme` configuration:
+- **Core** — navy, blue, gold, burgundy, cream
+- **Relationships** — teal (follower), coral (following), violet (mutual)
+- Each color has standard, light, and faint variants
 
 ## Architecture
 
@@ -173,8 +181,12 @@ src/
 │
 ├── utils/
 │   ├── stats.ts                 # Statistics computation and formatting
-│   ├── locationInference.ts     # Bio location parsing, normalization, and batch scanning
+│   ├── locationInference.ts     # Bio/display name location parsing, normalization, and batch scanning
 │   └── debug.ts                 # Debug logging utilities
+│
+├── test/
+│   ├── setup.ts                 # Vitest setup (jest-dom matchers)
+│   └── fixtures.ts              # Shared test data factories
 │
 ├── types/
 │   └── index.ts                 # TypeScript type definitions, modes, and category configs
