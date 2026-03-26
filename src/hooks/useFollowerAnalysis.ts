@@ -1,26 +1,21 @@
 /**
  * hooks/useFollowerAnalysis.ts — Core analysis pipeline orchestrator.
  *
- * Manages the multi-step async pipeline:
- *   1. Profile lookup
- *   2. Follower fetch (paginated)
- *   3. Following fetch (for mutual detection)
- *   4. Profile enrichment (batch)
- *   5. Interaction scoring (besties)
- *   6. Shared follows (inner circle)
- *   7. Stats computation
+ * Manages the multi-step async pipeline, skipping steps based on AnalysisMode:
+ *   - all:          profile → followers → following → enrich → interactions → connections → stats
+ *   - besties:      profile → followers → following → enrich → interactions → stats
+ *   - inner-circle: profile → followers → following → enrich → connections → stats
+ *   - lurkers:      profile → followers → following → enrich → stats
+ *   - location:     profile only (LocationGuess component handles the rest)
  *
- * Progress uses a weighted virtual scale (0–1000) so the bar moves visibly:
- *   - Early phases (profile + followers + following) → 0–30% (0–300)
- *   - Heavy phases (enriching + interactions + connections) → 30–100% (300–1000)
- * After the fast phases, the observed rate is used to estimate total runtime.
+ * Progress uses a weighted virtual scale (0–1000) adapted to the active steps.
  */
 
 import { useState, useCallback, useRef } from 'react'
 import { getProfile, getAllFollowers, getAllFollowing, enrichProfiles, computeBestieScores, computeSharedFollows, type IsAborted } from '../api/bluesky'
 import { computeStats } from '../utils/stats'
 import { debugLog } from '../utils/debug'
-import type { AnalysisProgress, AnalysisResult, EnrichedFollower } from '../types'
+import type { AnalysisMode, AnalysisProgress, AnalysisResult, EnrichedFollower } from '../types'
 
 const INITIAL_PROGRESS: AnalysisProgress = {
   phase: 'idle',
@@ -33,15 +28,17 @@ export function useFollowerAnalysis() {
   const [progress, setProgress] = useState<AnalysisProgress>(INITIAL_PROGRESS)
   const [result, setResult] = useState<AnalysisResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [mode, setMode] = useState<AnalysisMode>('all')
   const abortRef = useRef(false)
 
   const abort = useCallback(() => {
     abortRef.current = true
   }, [])
 
-  const analyze = useCallback(async (handle: string) => {
+  const analyze = useCallback(async (handle: string, analysisMode: AnalysisMode = 'all') => {
     setResult(null)
     setError(null)
+    setMode(analysisMode)
     abortRef.current = false
 
     const isAborted: IsAborted = () => abortRef.current
@@ -49,26 +46,52 @@ export function useFollowerAnalysis() {
 
     let currentPhase: AnalysisProgress['phase'] = 'profile'
 
-    try {
-      // Weighted progress using per-phase sub-ranges within a 1000-unit scale.
-      // Each phase owns a fixed slice so it can never overflow into the next.
-      const SCALE = 1000
-      const PHASES = {
-        early:        { start: 0,   end: 300 },  // 30%
-        enriching:    { start: 300, end: 400 },   // 10%
-        interactions: { start: 400, end: 700 },   // 30%
-        connections:  { start: 700, end: 1000 },  // 30%
+    // Location mode: just fetch profile and let the LocationGuess component handle the rest
+    if (analysisMode === 'location') {
+      try {
+        setProgress({ phase: 'profile', current: 0, total: 100, message: 'Looking them up...' })
+        const profile = await getProfile(handle)
+        const elapsedSeconds = Math.round((Date.now() - startTime) / 1000)
+        setResult({
+          profile,
+          followers: [],
+          mutualDids: new Set(),
+          stats: { totalFollowers: 0, totalMutuals: 0, avgFollowersOfFollowers: 0, avgPostsOfFollowers: 0 },
+          elapsedSeconds,
+          apiCalls: 1,
+        })
+        setProgress({ phase: 'done', current: 100, total: 100, message: 'All done!' })
+      } catch (err: any) {
+        const message = err?.message ?? 'An unknown error occurred'
+        setError(message)
+        setProgress({ phase: 'error', current: 0, total: 0, message })
       }
+      return
+    }
+
+    const needInteractions = analysisMode === 'all' || analysisMode === 'besties'
+    const needConnections = analysisMode === 'all' || analysisMode === 'inner-circle'
+
+    try {
+      const SCALE = 1000
+
+      // Adjust phase weights based on which heavy steps run
+      const PHASES = needInteractions && needConnections
+        ? { early: { start: 0, end: 300 }, enriching: { start: 300, end: 400 }, interactions: { start: 400, end: 700 }, connections: { start: 700, end: 1000 } }
+        : needInteractions
+        ? { early: { start: 0, end: 250 }, enriching: { start: 250, end: 350 }, interactions: { start: 350, end: 1000 }, connections: { start: 1000, end: 1000 } }
+        : needConnections
+        ? { early: { start: 0, end: 250 }, enriching: { start: 250, end: 350 }, interactions: { start: 1000, end: 1000 }, connections: { start: 350, end: 1000 } }
+        : { early: { start: 0, end: 500 }, enriching: { start: 500, end: 1000 }, interactions: { start: 1000, end: 1000 }, connections: { start: 1000, end: 1000 } }
+
       const phaseProgress = (phase: keyof typeof PHASES, done: number, total: number) => {
         const { start, end } = PHASES[phase]
-        if (total <= 0) return start
+        if (total <= 0 || start >= end) return start
         return Math.min(end, start + Math.round((done / total) * (end - start)))
       }
 
-      // Dynamic estimate: updated after each phase based on observed rates
       let estimatedSeconds: number | undefined
 
-      // Throttled emit: limit React state updates to once per 500ms
       let lastEmitTime = 0
       const EMIT_INTERVAL_MS = 500
       const emit = (phase: AnalysisProgress['phase'], current: number, total: number, message: string) => {
@@ -79,36 +102,28 @@ export function useFollowerAnalysis() {
           setProgress({ phase, current, total, message, estimatedSeconds })
         }
       }
-      // Force-emit for phase transitions (unthrottled)
       const emitForce = (phase: AnalysisProgress['phase'], current: number, total: number, message: string) => {
         currentPhase = phase
         lastEmitTime = Date.now()
         setProgress({ phase, current, total, message, estimatedSeconds })
       }
 
-      // Track total API calls across all phases
       let totalApiCalls = 0
 
-      // Step 1: Fetch the target user's profile
+      // Step 1: Profile
       emitForce('profile', 0, SCALE, 'Looking them up...')
       const profile = await getProfile(handle)
       totalApiCalls++
-      debugLog('profile', { followers: profile.followersCount, following: profile.followsCount, posts: profile.postsCount })
+      debugLog('profile', { mode: analysisMode, followers: profile.followersCount, following: profile.followsCount, posts: profile.postsCount })
 
-      // Estimate counts for progress tracking
       let estFollowers = profile.followersCount ?? 0
       let estFollows = profile.followsCount ?? 0
-
       let estFollowerPages = Math.ceil(estFollowers / 100) || 1
       const estFollowingPages = Math.ceil(estFollows / 100) || 1
-
-      // Early phase: profile(1) + followerPages + followingPages
       const earlyTotal = 1 + estFollowerPages + estFollowingPages
-      let earlyDone = 1 // profile done
+      let earlyDone = 1
 
-      debugLog('estimates', { earlyTotal, estFollowerPages, estFollowingPages })
-
-      // Step 2: Paginate through all followers
+      // Step 2: Followers
       emitForce('followers', phaseProgress('early', earlyDone, earlyTotal), SCALE, 'Rounding up followers...')
       const followers = await getAllFollowers(handle, (loaded) => {
         if (loaded > estFollowers) {
@@ -121,9 +136,8 @@ export function useFollowerAnalysis() {
       const actualFollowerPages = Math.ceil(followers.length / 100) || 1
       earlyDone = 1 + actualFollowerPages
       totalApiCalls += actualFollowerPages
-      debugLog('followers done', { count: followers.length, pages: actualFollowerPages })
 
-      // Step 3: Fetch following list for mutual detection
+      // Step 3: Following
       emitForce('following', phaseProgress('early', earlyDone, earlyTotal), SCALE, 'Checking who they follow...')
       const following = await getAllFollowing(handle, (loaded) => {
         earlyDone = 1 + actualFollowerPages + Math.ceil(loaded / 100)
@@ -131,87 +145,83 @@ export function useFollowerAnalysis() {
       })
       const followingDids = new Set(following)
       totalApiCalls += Math.ceil(following.length / 100) || 1
-      debugLog('following done', { count: following.length })
 
-      // Set initial estimate based on early phase rate
+      // Estimate
       const earlyElapsedMs = Date.now() - startTime
       const earlyCallCount = 1 + actualFollowerPages + (Math.ceil(following.length / 100) || 1)
       const msPerCall = earlyElapsedMs / earlyCallCount
       const estMutualCount = Math.min(followers.length, following.length)
-      // Rough total: enrich batches + ~200 interaction calls + mutual connections (concurrent /3)
-      const estRemainingCalls = (Math.ceil(followers.length / 25) || 1) + 200 + estMutualCount * 5 / 3
+      const estRemainingCalls = (Math.ceil(followers.length / 25) || 1)
+        + (needInteractions ? 200 : 0)
+        + (needConnections ? estMutualCount * 5 / 3 : 0)
       estimatedSeconds = Math.ceil((earlyElapsedMs + estRemainingCalls * msPerCall) / 1000)
-      debugLog('initial estimate', { earlyElapsedMs, msPerCall: Math.round(msPerCall), estimatedSeconds })
+      debugLog('initial estimate', { mode: analysisMode, earlyElapsedMs, msPerCall: Math.round(msPerCall), estimatedSeconds })
 
-      // Step 4: Enrich follower profiles with full stats
+      // Step 4: Enrich
       const followerDids = followers.map(f => f.did)
       const actualEnrichBatches = Math.ceil(followers.length / 25) || 1
-      let enrichDone = 0
       emitForce('enriching', phaseProgress('enriching', 0, actualEnrichBatches), SCALE, 'Getting the details...')
       const enriched = await enrichProfiles(followerDids, (loaded) => {
-        enrichDone = Math.ceil(loaded / 25)
+        const enrichDone = Math.ceil(loaded / 25)
         emit('enriching', phaseProgress('enriching', enrichDone, actualEnrichBatches), SCALE, `Getting the details (${loaded}/${followerDids.length})...`)
       }, isAborted)
       totalApiCalls += actualEnrichBatches
-      debugLog('enriching done', { batches: actualEnrichBatches, pct: Math.round(phaseProgress('enriching', actualEnrichBatches, actualEnrichBatches) / SCALE * 100) })
 
-      // Step 5: Compute bestie interaction scores
-      // Estimate total calls: feed pages + post*2 (thread+reposts) + friend feeds + threads
-      const estPosts = Math.min(profile.postsCount ?? 0, 1825)
-      const estInteractionCalls = Math.ceil(estPosts / 100) + estPosts * 2 + Math.min(100, estFollowers) * 100 + 20
-      let interactionCallsReported = 0
-      emitForce('interactions', phaseProgress('interactions', 0, estInteractionCalls), SCALE, 'Finding the besties...')
-      let lastInteractionLog = 0
-      const bestieResult = await computeBestieScores(profile.did, (apiCalls, message) => {
-        interactionCallsReported = apiCalls
-        // Use actual calls vs estimate, but cap at 95% so it doesn't hit 100% early
-        const interactionTotal = Math.max(estInteractionCalls, apiCalls + 10)
-        if (apiCalls - lastInteractionLog >= 500) {
-          debugLog('interactions', { apiCalls, message, pct: Math.round(phaseProgress('interactions', apiCalls, interactionTotal) / SCALE * 100) })
-          lastInteractionLog = apiCalls
-        }
-        emit('interactions', phaseProgress('interactions', apiCalls, interactionTotal), SCALE, message)
-      }, isAborted)
-      const { scores: bestieScores, interactedDids } = bestieResult
-      totalApiCalls += interactionCallsReported
-      debugLog('interactions done', { interactionCallsReported, estInteractionCalls })
+      // Step 5: Interactions (besties / all)
+      let bestieScores = new Map<string, number>()
+      let interactedDids = new Set<string>()
 
-      // Update estimate dynamically now that we know interaction rate
-      const elapsedSoFar = Date.now() - startTime
+      if (needInteractions) {
+        const estPosts = Math.min(profile.postsCount ?? 0, 1825)
+        const estInteractionCalls = Math.ceil(estPosts / 100) + estPosts * 2 + Math.min(100, estFollowers) * 100 + 20
+        let interactionCallsReported = 0
+        emitForce('interactions', phaseProgress('interactions', 0, estInteractionCalls), SCALE, 'Finding the besties...')
+        let lastInteractionLog = 0
+        const bestieResult = await computeBestieScores(profile.did, (apiCalls, message) => {
+          interactionCallsReported = apiCalls
+          const interactionTotal = Math.max(estInteractionCalls, apiCalls + 10)
+          if (apiCalls - lastInteractionLog >= 500) {
+            debugLog('interactions', { apiCalls, message })
+            lastInteractionLog = apiCalls
+          }
+          emit('interactions', phaseProgress('interactions', apiCalls, interactionTotal), SCALE, message)
+        }, isAborted)
+        bestieScores = bestieResult.scores
+        interactedDids = bestieResult.interactedDids
+        totalApiCalls += interactionCallsReported
+      }
+
+      // Update estimate before connections
       const mutualFollowerDids = followerDids.filter(d => followingDids.has(d))
-      // Rough estimate: connections take ~70% of total time for large accounts
-      estimatedSeconds = Math.ceil(elapsedSoFar / 1000 * (mutualFollowerDids.length > 50 ? 4 : 2))
-      debugLog('estimate updated', { elapsedSoFar, estimatedSeconds, mutuals: mutualFollowerDids.length })
+      if (needConnections) {
+        const elapsedSoFar = Date.now() - startTime
+        estimatedSeconds = Math.ceil(elapsedSoFar / 1000 * (mutualFollowerDids.length > 50 ? 4 : 2))
+      }
 
-      // Step 6: Compute shared follows (only for mutuals — followers the target also follows back)
-      const connectionStart = Date.now()
-      emitForce('connections', phaseProgress('connections', 0, mutualFollowerDids.length), SCALE, 'Mapping the inner circle...')
-      let lastConnectionLog = 0
-      let connectionFollowersDone = 0
-      let connectionPages = 0
-      const sharedFollows = await computeSharedFollows(mutualFollowerDids, followingDids, (pages, message) => {
-        connectionPages = pages
-        // Extract followersDone from the message (e.g., "(42/178)")
-        const match = message.match(/\((\d+)\//)
-        if (match) connectionFollowersDone = parseInt(match[1])
-        // Dynamically update estimate based on connection rate
-        if (connectionFollowersDone > 3) {
-          const connectionElapsed = Date.now() - connectionStart
-          const rate = connectionElapsed / connectionFollowersDone
-          const remaining = (mutualFollowerDids.length - connectionFollowersDone) * rate
-          estimatedSeconds = Math.ceil((Date.now() - startTime + remaining) / 1000)
-        }
-        if (pages - lastConnectionLog >= 500) {
-          debugLog('connections', { pages, message, pct: Math.round(phaseProgress('connections', connectionFollowersDone, mutualFollowerDids.length) / SCALE * 100) })
-          lastConnectionLog = pages
-        }
-        emit('connections', phaseProgress('connections', connectionFollowersDone, mutualFollowerDids.length), SCALE, message)
-      }, isAborted)
+      // Step 6: Connections (inner-circle / all)
+      let sharedFollows = new Map<string, number>()
 
-      totalApiCalls += connectionPages
-      debugLog('connections done', { followersDone: connectionFollowersDone, mutuals: mutualFollowerDids.length, elapsed: ((Date.now() - startTime) / 1000).toFixed(1) + 's' })
+      if (needConnections) {
+        const connectionStart = Date.now()
+        emitForce('connections', phaseProgress('connections', 0, mutualFollowerDids.length), SCALE, 'Mapping the inner circle...')
+        let connectionFollowersDone = 0
+        let connectionPages = 0
+        sharedFollows = await computeSharedFollows(mutualFollowerDids, followingDids, (pages, message) => {
+          connectionPages = pages
+          const match = message.match(/\((\d+)\//)
+          if (match) connectionFollowersDone = parseInt(match[1])
+          if (connectionFollowersDone > 3) {
+            const connectionElapsed = Date.now() - connectionStart
+            const rate = connectionElapsed / connectionFollowersDone
+            const remaining = (mutualFollowerDids.length - connectionFollowersDone) * rate
+            estimatedSeconds = Math.ceil((Date.now() - startTime + remaining) / 1000)
+          }
+          emit('connections', phaseProgress('connections', connectionFollowersDone, mutualFollowerDids.length), SCALE, message)
+        }, isAborted)
+        totalApiCalls += connectionPages
+      }
 
-      // Step 7: Map to EnrichedFollower objects
+      // Step 7: Assemble results
       const enrichedFollowers: EnrichedFollower[] = followers.map((f, i) => {
         const detailed = enriched.get(f.did)
         return {
@@ -231,12 +241,10 @@ export function useFollowerAnalysis() {
         }
       })
 
-      // Step 8: Compute aggregate statistics
       const stats = computeStats(enrichedFollowers, followingDids)
-
       const elapsedSeconds = Math.round((Date.now() - startTime) / 1000)
       setResult({ profile, followers: enrichedFollowers, mutualDids: followingDids, stats, elapsedSeconds, apiCalls: totalApiCalls })
-      debugLog('done', { totalElapsed: ((Date.now() - startTime) / 1000).toFixed(1) + 's', estimatedSeconds })
+      debugLog('done', { mode: analysisMode, totalElapsed: ((Date.now() - startTime) / 1000).toFixed(1) + 's' })
       setProgress({ phase: 'done', current: SCALE, total: SCALE, message: 'All done!' })
     } catch (err: any) {
       const message = err?.message ?? 'An unknown error occurred'
@@ -252,5 +260,5 @@ export function useFollowerAnalysis() {
     setError(null)
   }, [])
 
-  return { progress, result, error, analyze, reset, abort }
+  return { progress, result, error, mode, analyze, reset, abort }
 }

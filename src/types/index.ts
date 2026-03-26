@@ -8,6 +8,17 @@
 
 import type { AppBskyActorDefs } from '@atproto/api'
 
+/** Which analysis to run — controls which pipeline steps execute and which results display */
+export type AnalysisMode = 'all' | 'besties' | 'inner-circle' | 'lurkers' | 'location'
+
+export const ANALYSIS_MODES: { value: AnalysisMode; label: string }[] = [
+  { value: 'all', label: 'Full Analysis' },
+  { value: 'besties', label: 'Besties' },
+  { value: 'inner-circle', label: 'Inner Circle' },
+  { value: 'lurkers', label: 'Lurkers' },
+  { value: 'location', label: 'Location' },
+]
+
 // Re-export the AT Protocol profile types so the rest of the app imports from here
 // rather than depending directly on @atproto/api internals.
 export type ProfileViewDetailed = AppBskyActorDefs.ProfileViewDetailed

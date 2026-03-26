@@ -4,12 +4,14 @@
  * using the public Bluesky API. Features a heat scale for confidence.
  */
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { getProfile, fetchPostsForLocation } from '../api/bluesky'
 import { inferLocation, type LocationGuess as LocationGuessType, type LocationSignal } from '../utils/locationInference'
 
 interface Props {
   handle: string
+  /** If true, automatically start analysis on mount */
+  autoRun?: boolean
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -69,12 +71,20 @@ function HeatBar({ heat, size = 'normal' }: { heat: number; size?: 'normal' | 's
   )
 }
 
-export function LocationGuess({ handle }: Props) {
+export function LocationGuess({ handle, autoRun }: Props) {
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('')
   const [guess, setGuess] = useState<LocationGuessType | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expandedSignal, setExpandedSignal] = useState<number | null>(null)
+  const didAutoRun = useRef(false)
+
+  useEffect(() => {
+    if (autoRun && !didAutoRun.current) {
+      didAutoRun.current = true
+      run()
+    }
+  }, [autoRun])
 
   const run = async () => {
     setLoading(true)

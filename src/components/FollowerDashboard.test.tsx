@@ -21,33 +21,35 @@ function makeResult(overrides: Partial<AnalysisResult> = {}): AnalysisResult {
       avgFollowersOfFollowers: 16837,
       avgPostsOfFollowers: 1734,
     },
+    elapsedSeconds: 10,
+    apiCalls: 42,
     ...overrides,
   }
 }
 
 describe('FollowerDashboard', () => {
   it('renders overview stat cards', () => {
-    render(<FollowerDashboard result={makeResult()} />)
-    expect(screen.getByText('Total Followers')).toBeInTheDocument()
+    render(<FollowerDashboard result={makeResult()} mode="all" />)
+    expect(screen.getByText('Total Active Followers')).toBeInTheDocument()
     expect(screen.getByText('Mutuals')).toBeInTheDocument()
     expect(screen.getByText('Avg Followers')).toBeInTheDocument()
     expect(screen.getByText('Avg Posts')).toBeInTheDocument()
   })
 
   it('renders follower list heading', () => {
-    render(<FollowerDashboard result={makeResult()} />)
+    render(<FollowerDashboard result={makeResult()} mode="all" />)
     expect(screen.getByText('All Followers')).toBeInTheDocument()
   })
 
   it('renders all followers', () => {
-    render(<FollowerDashboard result={makeResult()} />)
+    render(<FollowerDashboard result={makeResult()} mode="all" />)
     expect(screen.getByText('Alice')).toBeInTheDocument()
     expect(screen.getByText('Bob')).toBeInTheDocument()
     expect(screen.getByText('Charlie')).toBeInTheDocument()
   })
 
   it('renders formatted stat values', () => {
-    render(<FollowerDashboard result={makeResult()} />)
+    render(<FollowerDashboard result={makeResult()} mode="all" />)
     expect(screen.getByText('3')).toBeInTheDocument() // totalFollowers
     expect(screen.getByText('1')).toBeInTheDocument() // totalMutuals
     expect(screen.getByText('16.8K')).toBeInTheDocument() // avgFollowers

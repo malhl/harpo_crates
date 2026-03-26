@@ -13,7 +13,7 @@ describe('SearchBar', () => {
 
   it('renders input and button', () => {
     render(<SearchBar {...defaultProps} />)
-    expect(screen.getByPlaceholderText(/enter a bluesky handle/i)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/enter full handle/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /analyze/i })).toBeInTheDocument()
   })
 
@@ -22,10 +22,10 @@ describe('SearchBar', () => {
     const user = userEvent.setup()
     render(<SearchBar {...defaultProps} onSearch={onSearch} />)
 
-    await user.type(screen.getByPlaceholderText(/enter a bluesky handle/i), 'test.bsky.social')
+    await user.type(screen.getByPlaceholderText(/enter full handle/i), 'test.bsky.social')
     await user.click(screen.getByRole('button', { name: /analyze/i }))
 
-    expect(onSearch).toHaveBeenCalledWith('test.bsky.social')
+    expect(onSearch).toHaveBeenCalledWith('test.bsky.social', 'all')
   })
 
   it('strips leading @ from handle', async () => {
@@ -33,15 +33,15 @@ describe('SearchBar', () => {
     const user = userEvent.setup()
     render(<SearchBar {...defaultProps} onSearch={onSearch} />)
 
-    await user.type(screen.getByPlaceholderText(/enter a bluesky handle/i), '@test.bsky.social')
+    await user.type(screen.getByPlaceholderText(/enter full handle/i), '@test.bsky.social')
     await user.click(screen.getByRole('button', { name: /analyze/i }))
 
-    expect(onSearch).toHaveBeenCalledWith('test.bsky.social')
+    expect(onSearch).toHaveBeenCalledWith('test.bsky.social', 'all')
   })
 
   it('disables input and button when loading', () => {
     render(<SearchBar {...defaultProps} loading={true} />)
-    expect(screen.getByPlaceholderText(/enter a bluesky handle/i)).toBeDisabled()
+    expect(screen.getByPlaceholderText(/enter full handle/i)).toBeDisabled()
     expect(screen.getByRole('button', { name: /analyzing/i })).toBeDisabled()
   })
 
@@ -80,7 +80,7 @@ describe('SearchBar', () => {
     render(<SearchBar {...defaultProps} onSearch={onSearch} />)
 
     // Type only spaces
-    await user.type(screen.getByPlaceholderText(/enter a bluesky handle/i), '   ')
+    await user.type(screen.getByPlaceholderText(/enter full handle/i), '   ')
     await user.click(screen.getByRole('button', { name: /analyze/i }))
 
     expect(onSearch).not.toHaveBeenCalled()

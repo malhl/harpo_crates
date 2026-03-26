@@ -4,16 +4,15 @@
  * Orchestrates the top-level layout and application state flow:
  *
  *   1. Header — app title and tagline
- *   2. SearchBar — handle input that triggers analysis
+ *   2. SearchBar — handle input + mode selector that triggers analysis
  *   3. LoadingProgress — progress bar during analysis (auto-hides when idle/done)
  *   4. Error display — shown if any pipeline step fails
- *   5. Results — ProfileSummary + FollowerDashboard (shown after analysis completes)
+ *   5. Results — mode-dependent: ProfileSummary + LocationGuess or FollowerDashboard
  *   6. Empty state — shown before any search is performed
  *   7. Footer — privacy note about client-side-only processing
  *
  * All state management is handled by the useFollowerAnalysis hook, which
- * exposes progress, result, error, analyze, and reset. This component
- * simply wires those to the appropriate UI components.
+ * exposes progress, result, error, mode, analyze, and reset.
  */
 
 import harpoCrateLogo from './assets/lyre_crate_logo.svg'
@@ -25,8 +24,7 @@ import { LocationGuess } from './components/LocationGuess'
 import { useFollowerAnalysis } from './hooks/useFollowerAnalysis'
 
 function App() {
-  const { progress, result, error, analyze, reset, abort } = useFollowerAnalysis()
-  // The analysis is "loading" if we're in any phase other than idle, done, or error
+  const { progress, result, error, mode, analyze, reset, abort } = useFollowerAnalysis()
   const loading = !['idle', 'done', 'error'].includes(progress.phase)
 
   return (
@@ -45,7 +43,7 @@ function App() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-8 space-y-8">
-        {/* Search — disabled while loading to prevent concurrent analyses */}
+        {/* Search + mode selector */}
         <SearchBar
           onSearch={analyze}
           loading={loading}
@@ -53,10 +51,10 @@ function App() {
           hasResult={!!result}
         />
 
-        {/* Progress bar — auto-hides when idle or complete */}
+        {/* Progress bar */}
         <LoadingProgress progress={progress} onTimeout={abort} />
 
-        {/* Error state — shown when any step of the pipeline fails */}
+        {/* Error state */}
         {error && (
           <div className="max-w-xl mx-auto bg-burgundy-faint border border-burgundy text-burgundy rounded-lg p-4 text-sm">
             <p className="font-medium">Something went wrong</p>
@@ -64,16 +62,22 @@ function App() {
           </div>
         )}
 
-        {/* Results — profile card and full follower dashboard */}
-        {result && (
+        {/* Results — mode-dependent rendering */}
+        {result && mode === 'location' && (
           <div className="space-y-8">
             <ProfileSummary profile={result.profile} />
-            <LocationGuess handle={result.profile.handle} />
-            <FollowerDashboard result={result} />
+            <LocationGuess handle={result.profile.handle} autoRun />
           </div>
         )}
 
-        {/* Empty state — shown before any search has been performed */}
+        {result && mode !== 'location' && (
+          <div className="space-y-8">
+            <ProfileSummary profile={result.profile} />
+            <FollowerDashboard result={result} mode={mode} />
+          </div>
+        )}
+
+        {/* Empty state */}
         {!result && !loading && !error && (
           <div className="text-center py-16">
             <p className="text-navy-faint text-lg">
@@ -86,7 +90,7 @@ function App() {
         )}
       </main>
 
-      {/* Footer — privacy assurance */}
+      {/* Footer */}
       <footer className="border-t border-cream-dark mt-16">
         <div className="max-w-5xl mx-auto px-4 py-4 text-center text-xs text-navy-faint space-y-1">
           <p>Harpo Crates uses the public AT Protocol API. No data is stored or transmitted to any server.</p>

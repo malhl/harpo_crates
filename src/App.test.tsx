@@ -19,8 +19,10 @@ describe('App', () => {
     progress: { phase: 'idle' as const, current: 0, total: 0, message: '' },
     result: null,
     error: null,
+    mode: 'all' as const,
     analyze: vi.fn(),
     reset: vi.fn(),
+    abort: vi.fn(),
   }
 
   it('renders header with title', () => {
@@ -41,7 +43,7 @@ describe('App', () => {
   it('renders search bar', () => {
     mockUseFollowerAnalysis.mockReturnValue(idleState)
     render(<App />)
-    expect(screen.getByPlaceholderText(/enter a bluesky handle/i)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/enter full handle/i)).toBeInTheDocument()
   })
 
   it('renders empty state when idle', () => {
