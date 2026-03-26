@@ -46,19 +46,44 @@ export function useFollowerAnalysis() {
 
     let currentPhase: AnalysisProgress['phase'] = 'profile'
 
-    // Location mode: just fetch profile and let the LocationGuess component handle the rest
+    // Location mode: fetch profile + followers (slim profiles include bios for location parsing)
     if (analysisMode === 'location') {
       try {
         setProgress({ phase: 'profile', current: 0, total: 100, message: 'Looking them up...' })
         const profile = await getProfile(handle)
+        let totalApiCalls = 1
+
+        const estFollowers = profile.followersCount ?? 0
+        setProgress({ phase: 'followers', current: 10, total: 100, message: 'Rounding up followers...' })
+        const followers = await getAllFollowers(handle, (loaded) => {
+          const pct = Math.min(90, 10 + Math.round((loaded / Math.max(estFollowers, 1)) * 80))
+          setProgress({ phase: 'followers', current: pct, total: 100, message: `Rounding up followers (${loaded}/${estFollowers})...` })
+        })
+        totalApiCalls += Math.ceil(followers.length / 100) || 1
+
+        // Map slim followers to EnrichedFollower shape (stats will be zero since we skip enrichment)
+        const enrichedFollowers: EnrichedFollower[] = followers.map((f, i) => ({
+          did: f.did,
+          handle: f.handle,
+          displayName: f.displayName || '',
+          avatar: f.avatar,
+          description: f.description,
+          followersCount: 0,
+          followsCount: 0,
+          postsCount: 0,
+          followerIndex: i,
+          interactionScore: 0,
+          sharedFollowsCount: 0,
+        }))
+
         const elapsedSeconds = Math.round((Date.now() - startTime) / 1000)
         setResult({
           profile,
-          followers: [],
+          followers: enrichedFollowers,
           mutualDids: new Set(),
-          stats: { totalFollowers: 0, totalMutuals: 0, avgFollowersOfFollowers: 0, avgPostsOfFollowers: 0 },
+          stats: { totalFollowers: followers.length, totalMutuals: 0, avgFollowersOfFollowers: 0, avgPostsOfFollowers: 0 },
           elapsedSeconds,
-          apiCalls: 1,
+          apiCalls: totalApiCalls,
         })
         setProgress({ phase: 'done', current: 100, total: 100, message: 'All done!' })
       } catch (err: any) {

@@ -420,3 +420,170 @@ export function inferLocation(
   // ── Nothing found ──
   return { bestGuess: null, heat: 0, specificity: 'unknown', signals }
 }
+
+// ── Batch follower location scanning ──
+
+export interface FollowerLocationResult {
+  /** Location string → list of follower handles at that location */
+  locations: Map<string, string[]>
+  /** Sorted [location, count] pairs, descending */
+  ranked: [string, number][]
+  /** How many followers had a detectable location */
+  detected: number
+  /** Total followers scanned */
+  total: number
+}
+
+/** Also try to match bio text against known city keywords (for bios that just say a city name) */
+const CITY_NAMES = new Map<string, string>()
+for (const [keyword, location] of LOCATION_KEYWORDS) {
+  if (!SHORT_KEYWORDS.has(keyword)) {
+    CITY_NAMES.set(keyword.toLowerCase(), location)
+  }
+}
+
+/** Common abbreviations and alternate names people use in bios */
+const BIO_ALIASES = new Map<string, string>([
+  // US city abbreviations (safe — not common English words)
+  ['atl', 'Atlanta, US'], ['pdx', 'Portland, US'], ['phx', 'Phoenix, US'],
+  ['slc', 'Salt Lake City, US'], ['stl', 'St. Louis, US'],
+  ['dtx', 'Dallas, US'], ['dfw', 'Dallas, US'],
+  // US state abbreviations — only those that aren't common English words.
+  // Omitted: in, or, al, la, ma, oh, pa, co, mi, va, ga, md, me, hi, ok, id
+  // These still work when written as "City, ST" via STATE_ABBREVS + normalizeLocation().
+  ['tx', 'Texas, US'], ['fl', 'Florida, US'], ['ny', 'New York, US'],
+  ['il', 'Illinois, US'], ['mn', 'Minnesota, US'], ['nc', 'North Carolina, US'],
+  ['nj', 'New Jersey, US'], ['ct', 'Connecticut, US'],
+  ['wi', 'Wisconsin, US'], ['tn', 'Tennessee, US'],
+  ['az', 'Arizona, US'], ['nv', 'Nevada, US'], ['sc', 'South Carolina, US'],
+  ['ky', 'Kentucky, US'], ['ut', 'Utah, US'],
+  // Country-level
+  ['uk', 'United Kingdom'], ['the uk', 'United Kingdom'],
+  ['england', 'United Kingdom'], ['scotland', 'United Kingdom'], ['wales', 'United Kingdom'],
+  ['usa', 'United States'], ['the us', 'United States'], ['america', 'United States'],
+  ['brasil', 'Brazil'], ['deutschland', 'Germany'], ['españa', 'Spain'],
+])
+
+/** Map "City, ST" patterns to their normalized form — e.g. "Seattle, WA" → "Seattle, US" */
+const STATE_ABBREVS = new Map<string, string>([
+  ['wa', 'Seattle'], ['or', 'Portland'], ['ca', 'Los Angeles'], ['tx', 'Houston'],
+  ['fl', 'Miami'], ['ny', 'New York'], ['il', 'Chicago'], ['oh', 'Cleveland'],
+  ['pa', 'Philadelphia'], ['co', 'Denver'], ['mn', 'Minneapolis'], ['ga', 'Atlanta'],
+  ['mi', 'Detroit'], ['va', 'Richmond'], ['nc', 'Charlotte'], ['ma', 'Boston'],
+  ['nj', 'New Jersey, US'], ['ct', 'Connecticut, US'], ['wi', 'Milwaukee'],
+  ['md', 'Baltimore'], ['tn', 'Nashville'], ['mo', 'St. Louis'], ['az', 'Phoenix'],
+  ['nv', 'Las Vegas'], ['ut', 'Salt Lake City'],
+])
+
+/**
+ * Scans an array of follower bios for location signals.
+ * Uses bio regex patterns first, then falls back to keyword matching.
+ * Returns aggregated location data.
+ */
+export function scanFollowerLocations(
+  followers: { handle: string; description?: string }[],
+): FollowerLocationResult {
+  const locations = new Map<string, string[]>()
+  let detected = 0
+
+  for (const f of followers) {
+    const bio = f.description
+    if (!bio) continue
+
+    let location: string | null = null
+
+    // Try structured bio patterns first (most reliable)
+    for (const pattern of BIO_PATTERNS) {
+      const match = bio.match(pattern)
+      if (match?.[1]) {
+        const raw = match[1].split('\n')[0].trim().replace(/[.!|·•—–\-🏳🌈]+$/, '').trim()
+        if (raw.length > 1 && raw.length < 80) {
+          // Try to normalize against known locations
+          location = normalizeLocation(raw)
+          break
+        }
+      }
+    }
+
+    // Fall back: scan bio for known city/country names and aliases
+    if (!location) {
+      const bioLower = bio.toLowerCase()
+      // Check aliases (ATL, PDX, UK, etc.) with word boundaries
+      for (const [alias, loc] of BIO_ALIASES) {
+        if (new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(bio)) {
+          location = loc
+          break
+        }
+      }
+      // Check city names
+      if (!location) {
+        for (const [keyword, loc] of CITY_NAMES) {
+          if (keyword.length <= 4) {
+            if (new RegExp(`\\b${keyword}\\b`, 'i').test(bio)) {
+              location = loc
+              break
+            }
+          } else if (bioLower.includes(keyword)) {
+            location = loc
+            break
+          }
+        }
+      }
+    }
+
+    if (location) {
+      detected++
+      const list = locations.get(location) ?? []
+      list.push(f.handle)
+      locations.set(location, list)
+    }
+  }
+
+  const ranked = [...locations.entries()]
+    .map(([loc, handles]) => [loc, handles.length] as [string, number])
+    .sort((a, b) => b[1] - a[1])
+
+  return { locations, ranked, detected, total: followers.length }
+}
+
+/** Try to normalize a free-text location against known cities/regions */
+function normalizeLocation(raw: string): string {
+  const lower = raw.toLowerCase().trim()
+
+  // Check aliases first (ATL, PDX, UK, etc.)
+  const alias = BIO_ALIASES.get(lower)
+  if (alias) return alias
+
+  // "City, ST" pattern — e.g. "Seattle, WA" or "Portland, OR"
+  const cityStateMatch = raw.match(/^([A-Za-z\s.'-]+),\s*([A-Z]{2})$/i)
+  if (cityStateMatch) {
+    const city = cityStateMatch[1].trim()
+    const state = cityStateMatch[2].toLowerCase()
+    // Try to find the city in our known locations
+    const cityLower = city.toLowerCase()
+    for (const [keyword, location] of CITY_NAMES) {
+      if (keyword === cityLower) return location
+    }
+    // If city not found but state is valid, return "City, US"
+    if (STATE_ABBREVS.has(state)) {
+      return `${city}, US`
+    }
+  }
+
+  // Direct match against known location names
+  for (const [keyword, location] of CITY_NAMES) {
+    if (lower === keyword || lower.startsWith(keyword + ',') || lower.startsWith(keyword + ' ')) {
+      return location
+    }
+  }
+
+  // Check if the raw text contains a known city
+  for (const [keyword, location] of CITY_NAMES) {
+    if (keyword.length >= 5 && lower.includes(keyword)) {
+      return location
+    }
+  }
+
+  // Return as-is if we can't normalize (still useful for display)
+  return raw
+}
