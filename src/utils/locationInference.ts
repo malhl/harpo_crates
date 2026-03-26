@@ -475,6 +475,44 @@ const STATE_ABBREVS = new Map<string, string>([
   ['nv', 'Las Vegas'], ['ut', 'Salt Lake City'],
 ])
 
+/** Expand "City, Country" to "City, State/Province, Country" for display */
+const STATE_PROVINCE_MAP = new Map<string, string>([
+  // US cities
+  ['New York, US', 'New York, NY, US'], ['Los Angeles, US', 'Los Angeles, CA, US'],
+  ['Chicago, US', 'Chicago, IL, US'], ['Houston, US', 'Houston, TX, US'],
+  ['Phoenix, US', 'Phoenix, AZ, US'], ['Philadelphia, US', 'Philadelphia, PA, US'],
+  ['San Antonio, US', 'San Antonio, TX, US'], ['San Diego, US', 'San Diego, CA, US'],
+  ['Dallas, US', 'Dallas, TX, US'], ['Austin, US', 'Austin, TX, US'],
+  ['San Francisco, US', 'San Francisco, CA, US'], ['Seattle, US', 'Seattle, WA, US'],
+  ['Denver, US', 'Denver, CO, US'], ['Boston, US', 'Boston, MA, US'],
+  ['Nashville, US', 'Nashville, TN, US'], ['Portland, US', 'Portland, OR, US'],
+  ['Las Vegas, US', 'Las Vegas, NV, US'], ['Atlanta, US', 'Atlanta, GA, US'],
+  ['Miami, US', 'Miami, FL, US'], ['Minneapolis, US', 'Minneapolis, MN, US'],
+  ['Detroit, US', 'Detroit, MI, US'], ['Pittsburgh, US', 'Pittsburgh, PA, US'],
+  ['Baltimore, US', 'Baltimore, MD, US'], ['Milwaukee, US', 'Milwaukee, WI, US'],
+  ['Cleveland, US', 'Cleveland, OH, US'], ['St. Louis, US', 'St. Louis, MO, US'],
+  ['Tampa, US', 'Tampa, FL, US'], ['Orlando, US', 'Orlando, FL, US'],
+  ['Sacramento, US', 'Sacramento, CA, US'], ['Raleigh, US', 'Raleigh, NC, US'],
+  ['Charlotte, US', 'Charlotte, NC, US'], ['Salt Lake City, US', 'Salt Lake City, UT, US'],
+  ['Richmond, US', 'Richmond, VA, US'], ['Olympia, US', 'Olympia, WA, US'],
+  ['Tacoma, US', 'Tacoma, WA, US'], ['Spokane, US', 'Spokane, WA, US'],
+  ['Boise, US', 'Boise, ID, US'], ['Eugene, US', 'Eugene, OR, US'],
+  ['Bend, US', 'Bend, OR, US'], ['Honolulu, US', 'Honolulu, HI, US'],
+  ['Anchorage, US', 'Anchorage, AK, US'],
+  // Canada
+  ['Toronto, Canada', 'Toronto, ON, Canada'], ['Vancouver, Canada', 'Vancouver, BC, Canada'],
+  ['Montreal, Canada', 'Montreal, QC, Canada'], ['Ottawa, Canada', 'Ottawa, ON, Canada'],
+  ['Calgary, Canada', 'Calgary, AB, Canada'], ['Edmonton, Canada', 'Edmonton, AB, Canada'],
+  ['Halifax, Canada', 'Halifax, NS, Canada'],
+  // Australia
+  ['Sydney, Australia', 'Sydney, NSW, Australia'], ['Melbourne, Australia', 'Melbourne, VIC, Australia'],
+  ['Brisbane, Australia', 'Brisbane, QLD, Australia'], ['Perth, Australia', 'Perth, WA, Australia'],
+])
+
+function expandStateProvince(location: string): string {
+  return STATE_PROVINCE_MAP.get(location) ?? location
+}
+
 /**
  * Scans an array of follower bios for location signals.
  * Uses bio regex patterns first, then falls back to keyword matching.
@@ -508,22 +546,22 @@ export function scanFollowerLocations(
     // Fall back: scan bio for known city/country names and aliases
     if (!location) {
       const bioLower = bio.toLowerCase()
-      // Check aliases (ATL, PDX, UK, etc.) with word boundaries
-      for (const [alias, loc] of BIO_ALIASES) {
-        if (new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(bio)) {
+      // Check city names first (more specific than aliases)
+      for (const [keyword, loc] of CITY_NAMES) {
+        if (keyword.length <= 4) {
+          if (new RegExp(`\\b${keyword}\\b`, 'i').test(bio)) {
+            location = loc
+            break
+          }
+        } else if (bioLower.includes(keyword)) {
           location = loc
           break
         }
       }
-      // Check city names
+      // Then check aliases (ATL, PDX, UK, England, etc.) with word boundaries
       if (!location) {
-        for (const [keyword, loc] of CITY_NAMES) {
-          if (keyword.length <= 4) {
-            if (new RegExp(`\\b${keyword}\\b`, 'i').test(bio)) {
-              location = loc
-              break
-            }
-          } else if (bioLower.includes(keyword)) {
+        for (const [alias, loc] of BIO_ALIASES) {
+          if (new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(bio)) {
             location = loc
             break
           }
@@ -533,9 +571,10 @@ export function scanFollowerLocations(
 
     if (location) {
       detected++
-      const list = locations.get(location) ?? []
+      const display = expandStateProvince(location)
+      const list = locations.get(display) ?? []
       list.push(f.handle)
-      locations.set(location, list)
+      locations.set(display, list)
     }
   }
 

@@ -2,8 +2,9 @@
  * FollowerLocations.tsx — Aggregate follower location breakdown.
  *
  * Scans all follower bios for location signals and displays a ranked
- * breakdown of where followers are posting from. Runs entirely client-side
- * with no additional API calls (uses bio data already fetched).
+ * breakdown of where followers are posting from, using the same tile
+ * layout as other dashboard categories. Paged by follower-count bands
+ * (e.g. "50+", "20–49", "10–19", etc.) computed to yield ~10 pages.
  */
 
 import { useMemo, useState } from 'react'
@@ -14,25 +15,76 @@ interface Props {
   followers: EnrichedFollower[]
 }
 
-const PAGE_SIZE = 20
+interface Band {
+  label: string
+  min: number
+  max: number
+}
+
+const TILE_PAGE_SIZE = 52
+
+/** Compute ~10 count bands from the data */
+function computeBands(ranked: [string, number][]): Band[] {
+  if (ranked.length === 0) return []
+  const max = ranked[0][1]
+  const min = ranked[ranked.length - 1][1]
+  if (max === min) return [{ label: `${max}`, min: max, max }]
+
+  // Try "nice" thresholds that produce readable labels
+  const nice = [500, 200, 100, 50, 20, 10, 5, 3, 2, 1]
+  const thresholds = nice.filter(n => n <= max)
+
+  // Build bands from thresholds
+  const bands: Band[] = []
+  for (let i = 0; i < thresholds.length; i++) {
+    const lo = thresholds[i]
+    const hi = i === 0 ? Infinity : thresholds[i - 1] - 1
+    const count = ranked.filter(([, c]) => c >= lo && c <= hi).length
+    if (count > 0) {
+      const label = hi === Infinity ? `${lo}+` : lo === hi ? `${lo}` : `${lo}–${hi}`
+      bands.push({ label, min: lo, max: hi })
+    }
+  }
+
+  // If we got too many bands (>12), merge the smallest ones
+  while (bands.length > 12) {
+    const last = bands.pop()!
+    const prev = bands[bands.length - 1]
+    prev.label = `${last.min}–${prev.max === Infinity ? prev.min + '+' : prev.max}`
+    prev.min = last.min
+  }
+
+  return bands
+}
 
 export function FollowerLocations({ followers }: Props) {
-  const [showAll, setShowAll] = useState(false)
+  const [activeBand, setActiveBand] = useState(0)
   const [expandedLocation, setExpandedLocation] = useState<string | null>(null)
+  const [tileCounts, setTileCounts] = useState<Record<string, number>>({})
 
   const result: FollowerLocationResult = useMemo(
     () => scanFollowerLocations(followers),
     [followers],
   )
 
-  const detectedPct = result.total > 0 ? Math.round((result.detected / result.total) * 100) : 0
-  const topCount = result.ranked[0]?.[1] ?? 0
-  const maxBarWidth = topCount
+  const followersByHandle = useMemo(() => {
+    const map = new Map<string, EnrichedFollower>()
+    for (const f of followers) map.set(f.handle, f)
+    return map
+  }, [followers])
 
-  const visibleLocations = showAll ? result.ranked : result.ranked.slice(0, PAGE_SIZE)
+  const bands = useMemo(() => computeBands(result.ranked), [result.ranked])
+
+  const detectedPct = result.total > 0 ? Math.round((result.detected / result.total) * 100) : 0
+  const maxCount = result.ranked[0]?.[1] ?? 1
+
+  const currentBand = bands[activeBand]
+  const bandLocations = currentBand
+    ? result.ranked.filter(([, count]) => count >= currentBand.min && count <= currentBand.max)
+    : []
 
   return (
-    <div className="w-full max-w-4xl mx-auto space-y-6">
+    <div className="w-full max-w-4xl mx-auto space-y-4">
       <div className="flex items-baseline justify-between">
         <h2 className="text-2xl font-bold text-navy tracking-wide uppercase">Follower Locations</h2>
         <p className="text-xs text-navy-faint">
@@ -48,95 +100,95 @@ export function FollowerLocations({ followers }: Props) {
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          {/* Top 8 summary cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-cream-dark border-b border-cream-dark">
-            {result.ranked.slice(0, 8).map(([location, count], i) => (
-              <div key={location} className={`px-3 py-3 text-center ${i >= 4 ? 'border-t border-cream-dark' : ''}`}>
-                <p className="text-xs text-navy-faint uppercase tracking-wider">
-                  #{i + 1}
-                </p>
-                <p className="text-sm font-bold text-navy mt-1 truncate" title={location}>
-                  {location}
-                </p>
-                <p className="text-xs text-navy-faint">
-                  {count} follower{count !== 1 ? 's' : ''}
-                </p>
-              </div>
-            ))}
-          </div>
+        <div className="space-y-3">
+          {/* Band selector */}
+          {bands.length > 1 && (
+            <div className="flex flex-wrap gap-1.5">
+              {bands.map((band, i) => {
+                const count = result.ranked.filter(([, c]) => c >= band.min && c <= band.max).length
+                return (
+                  <button
+                    key={band.label}
+                    onClick={() => { setActiveBand(i); setExpandedLocation(null) }}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
+                      activeBand === i
+                        ? 'bg-blue text-white'
+                        : 'bg-white border border-cream-dark text-navy-faint hover:border-navy-faint'
+                    }`}
+                  >
+                    {band.label} <span className="opacity-70">({count})</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
-          {/* Full ranked list with bars */}
-          <div className="divide-y divide-cream-dark/50">
-            {visibleLocations.map(([location, count]) => {
-              const pct = maxBarWidth > 0 ? (count / maxBarWidth) * 100 : 0
+          {/* Location rows for active band */}
+          <div className="space-y-2">
+            {bandLocations.map(([location, count]) => {
               const handles = result.locations.get(location) ?? []
               const isExpanded = expandedLocation === location
+              const visibleTiles = tileCounts[location] ?? TILE_PAGE_SIZE
+              const sortedHandles = [...handles].sort((a, b) => a.localeCompare(b))
+              const visibleHandles = sortedHandles.slice(0, visibleTiles)
 
               return (
                 <div key={location}>
                   <button
                     onClick={() => setExpandedLocation(isExpanded ? null : location)}
-                    className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-cream/30 transition-colors text-left cursor-pointer"
+                    className="w-full relative overflow-hidden flex items-center justify-between px-4 py-3 bg-white rounded-lg border border-cream-dark hover:border-navy-faint transition-colors text-left cursor-pointer"
                   >
-                    <span className="text-sm font-medium text-navy w-48 truncate shrink-0" title={location}>
-                      {location}
-                    </span>
-                    <div className="flex-1 h-5 bg-cream rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-blue rounded-full transition-all"
-                        style={{ width: `${Math.max(pct, 2)}%` }}
-                      />
+                    <div
+                      className="absolute inset-y-0 left-0 bg-blue-faint transition-all"
+                      style={{ width: `${(count / maxCount) * 100}%` }}
+                    />
+                    <div className="relative">
+                      <span className="font-medium text-navy">{location}</span>
+                      <span className="ml-2 text-sm text-navy-faint">({count})</span>
                     </div>
-                    <span className="text-sm font-bold text-navy w-10 text-right shrink-0">
-                      {count}
-                    </span>
-                    <span className="text-navy-faint text-xs w-4">
-                      {isExpanded ? '\u25B2' : '\u25BC'}
-                    </span>
+                    <span className="relative text-navy-faint">{isExpanded ? '▲' : '▼'}</span>
                   </button>
-                  {isExpanded && handles.length > 0 && (
-                    <div className="px-4 pb-3 pl-8">
-                      <div className="flex flex-wrap gap-1.5">
-                        {handles.map(h => (
-                          <a
-                            key={h}
-                            href={`https://bsky.app/profile/${h}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs bg-cream text-navy-light px-2 py-1 rounded-full hover:bg-cream-dark transition-colors"
-                          >
-                            @{h}
-                          </a>
-                        ))}
+
+                  {isExpanded && (
+                    <div className="mt-2 max-h-[500px] overflow-y-auto pr-1">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                        {visibleHandles.map(handle => {
+                          const follower = followersByHandle.get(handle)
+                          if (!follower) return null
+                          return (
+                            <a
+                              key={follower.did}
+                              href={`https://bsky.app/profile/${follower.handle}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex flex-col items-center text-center p-4 bg-white rounded-lg border border-cream-dark hover:border-navy-faint hover:shadow-sm transition-all no-underline"
+                            >
+                              {follower.avatar ? (
+                                <img src={follower.avatar} alt="" className="w-[84px] h-[84px] rounded-full" />
+                              ) : (
+                                <div className="w-[84px] h-[84px] rounded-full bg-cream-dark" />
+                              )}
+                              <span className="font-medium text-navy text-sm mt-2 truncate w-full">
+                                {follower.displayName || follower.handle}
+                              </span>
+                              <span className="text-xs text-navy-faint truncate w-full">@{follower.handle}</span>
+                            </a>
+                          )
+                        })}
                       </div>
+                      {handles.length > visibleTiles && (
+                        <button
+                          onClick={() => setTileCounts(c => ({ ...c, [location]: (c[location] ?? TILE_PAGE_SIZE) + TILE_PAGE_SIZE }))}
+                          className="w-full mt-3 py-2 text-sm text-blue hover:text-blue-light font-medium hover:bg-blue-faint rounded-lg transition-colors cursor-pointer"
+                        >
+                          Show more ({visibleTiles} of {handles.length})
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
               )
             })}
-          </div>
-
-          {/* Show more / less */}
-          {result.ranked.length > PAGE_SIZE && (
-            <div className="px-4 py-3 border-t border-cream-dark text-center">
-              <button
-                onClick={() => setShowAll(!showAll)}
-                className="text-xs text-blue hover:text-blue-light transition-colors cursor-pointer"
-              >
-                {showAll
-                  ? 'Show top 20 only'
-                  : `Show all ${result.ranked.length} locations`}
-              </button>
-            </div>
-          )}
-
-          {/* Footer */}
-          <div className="px-4 py-3 bg-cream text-xs text-navy-faint">
-            Based on follower bio text (patterns like "Based in...", city names, etc.).
-            {result.total - result.detected > 0 && (
-              <> {result.total - result.detected} followers had no detectable location in their bio.</>
-            )}
           </div>
         </div>
       )}

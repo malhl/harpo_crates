@@ -15,8 +15,8 @@ export const ANALYSIS_MODES: { value: AnalysisMode; label: string }[] = [
   { value: 'all', label: 'Full Analysis' },
   { value: 'besties', label: 'Besties' },
   { value: 'inner-circle', label: 'Inner Circle' },
+  { value: 'location', label: 'Locals' },
   { value: 'lurkers', label: 'Lurkers' },
-  { value: 'location', label: 'Location' },
 ]
 
 // Re-export the AT Protocol profile types so the rest of the app imports from here
