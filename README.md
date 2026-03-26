@@ -148,9 +148,11 @@ Scans both follower and following bios and display names for location signals, d
 - **Garbage rejection** — `normalizeLocation()` returns null for unrecognized text; word count limits and blocklists prevent non-location strings from leaking through
 - **All 50 US states + DC + Canadian provinces** — unknown cities with valid state abbreviations get proper state names (e.g. "Clearwater, FL" → "Clearwater, Florida, United States")
 - **Grouping** — radio menu to view by Most Specific location, Region (state/province), or Country
+- **Locality band** — if the target user's city is detected, a gold-highlighted pill appears before the count bands to quickly filter to their home location (adapts label per grouping level)
+- **Nearby search** — searches Bluesky for other people in the same city using `searchActors` with city names and aliases, then filters to only those who share at least one connection with the user's network
 - **Relationship coloring** — tiles color-coded by relationship: teal (follows you), coral (you follow), violet (mutual)
 - **Count-based band paging** — locations grouped into ~10 pages by follower count (e.g. "50+", "20–49", "10–19")
-- **Expandable tiles** — click any location to see follower tiles (avatar, name, handle) sorted alphabetically
+- **Expandable tiles** — click any location to see follower tiles (avatar, name, handle) sorted alphabetically; nearby search results appear inline with dashed borders and shared connection counts
 - **Proportional bars** — each location row shows a background bar scaled relative to the top location
 
 ### Color Palette
@@ -208,6 +210,7 @@ src/
 | `app.bsky.feed.getLikes` | Get who liked a post | Cursor-based, max 100/page |
 | `app.bsky.feed.getPostThread` | Get replies to a post | N/A (depth param) |
 | `app.bsky.feed.getRepostedBy` | Get who reposted a post | Cursor-based, max 100/page |
+| `app.bsky.actor.searchActors` | Search users by name/bio text | Cursor-based, max 100/page (10K ceiling) |
 
 **Base URL:** `https://public.api.bsky.app/xrpc/`
 

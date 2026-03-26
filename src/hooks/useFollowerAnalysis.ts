@@ -12,9 +12,10 @@
  */
 
 import { useState, useCallback, useRef } from 'react'
-import { getProfile, getAllFollowers, getAllFollowing, getAllFollowingProfiles, enrichProfiles, computeBestieScores, computeSharedFollows, type IsAborted } from '../api/bluesky'
+import { getProfile, getAllFollowers, getAllFollowing, getAllFollowingProfiles, enrichProfiles, computeBestieScores, computeSharedFollows, searchNearbyActors, checkSharedConnections, type IsAborted } from '../api/bluesky'
 import { computeStats } from '../utils/stats'
 import { debugLog } from '../utils/debug'
+import { detectUserCity, getSearchTermsForLocation, profileMatchesLocation } from '../utils/locationInference'
 import type { AnalysisMode, AnalysisProgress, AnalysisResult, EnrichedFollower } from '../types'
 
 const INITIAL_PROGRESS: AnalysisProgress = {
@@ -108,6 +109,62 @@ export function useFollowerAnalysis() {
           }))
 
         const allProfiles = [...enrichedFollowers, ...enrichedFollowing]
+        const allDids = new Set(allProfiles.map(p => p.did))
+        allDids.add(profile.did) // exclude the target user too
+
+        // Nearby search: detect target user's city, then search for others there
+        let nearbyProfiles: EnrichedFollower[] | undefined
+        let detectedCity: string | undefined
+        const userCity = detectUserCity(profile.description ?? '', profile.displayName ?? '')
+
+        if (userCity) {
+          detectedCity = userCity.expanded
+          const searchTerms = getSearchTermsForLocation(userCity.canonical)
+
+          if (searchTerms.length > 0) {
+            setProgress({ phase: 'enriching', current: 96, total: 100, message: `Searching for people in ${detectedCity}...` })
+            const { profiles: nearbyRaw, apiCalls: nearbyCalls } = await searchNearbyActors(
+              searchTerms, 5,
+              (found, msg) => setProgress({ phase: 'enriching', current: 96, total: 100, message: msg }),
+              isAborted,
+            )
+            totalApiCalls += nearbyCalls
+
+            // Filter: only keep profiles that actually match the target city, and aren't already in followers/following
+            const locationFiltered = nearbyRaw
+              .filter(p => !allDids.has(p.did) && profileMatchesLocation(p.description, p.displayName, userCity.canonical))
+
+            // Check shared connections: keep only people with at least 1 shared follower
+            const networkDids = new Set([...followerDids, ...followingDids])
+            if (locationFiltered.length > 0) {
+              setProgress({ phase: 'enriching', current: 97, total: 100, message: `Checking connections (${locationFiltered.length} candidates)...` })
+              const { shared, apiCalls: connCalls } = await checkSharedConnections(
+                locationFiltered, networkDids,
+                (checked, total) => setProgress({ phase: 'enriching', current: 97, total: 100, message: `Checking connections (${checked}/${total})...` }),
+                isAborted,
+              )
+              totalApiCalls += connCalls
+
+              // Only keep profiles with shared connections, sorted by overlap count desc
+              nearbyProfiles = locationFiltered
+                .filter(p => shared.has(p.did))
+                .sort((a, b) => (shared.get(b.did) ?? 0) - (shared.get(a.did) ?? 0))
+                .map((p, i) => ({
+                  did: p.did,
+                  handle: p.handle,
+                  displayName: p.displayName || '',
+                  avatar: p.avatar,
+                  description: p.description,
+                  followersCount: 0,
+                  followsCount: 0,
+                  postsCount: 0,
+                  followerIndex: allProfiles.length + i,
+                  interactionScore: 0,
+                  sharedFollowsCount: shared.get(p.did) ?? 0,
+                }))
+            }
+          }
+        }
 
         const elapsedSeconds = Math.round((Date.now() - startTime) / 1000)
         setResult({
@@ -119,6 +176,8 @@ export function useFollowerAnalysis() {
           apiCalls: totalApiCalls,
           followerDids,
           followingDids,
+          nearbyProfiles,
+          detectedCity,
         })
         setProgress({ phase: 'done', current: 100, total: 100, message: 'All done!' })
       } catch (err: any) {

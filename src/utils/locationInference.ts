@@ -736,3 +736,129 @@ function normalizeLocation(raw: string): string | null {
   // Not a recognized location — return null to avoid garbage
   return null
 }
+
+// ── Nearby search helpers ──
+
+/** Build reverse maps from canonical location → search query terms (lazily cached) */
+let _reverseKeywords: Map<string, string[]> | null = null
+let _reverseAliases: Map<string, string[]> | null = null
+
+function getReverseKeywords(): Map<string, string[]> {
+  if (_reverseKeywords) return _reverseKeywords
+  _reverseKeywords = new Map()
+  for (const [keyword, loc] of LOCATION_KEYWORDS) {
+    const list = _reverseKeywords.get(loc) ?? []
+    list.push(keyword)
+    _reverseKeywords.set(loc, list)
+  }
+  return _reverseKeywords
+}
+
+function getReverseAliases(): Map<string, string[]> {
+  if (_reverseAliases) return _reverseAliases
+  _reverseAliases = new Map()
+  for (const [alias, loc] of BIO_ALIASES) {
+    const list = _reverseAliases.get(loc) ?? []
+    list.push(alias)
+    _reverseAliases.set(loc, list)
+  }
+  return _reverseAliases
+}
+
+/**
+ * Detect the target user's city from their bio and display name.
+ * Returns the canonical (internal) and expanded (display) forms, or null if not found.
+ */
+export function detectUserCity(bio: string, displayName: string): { canonical: string; expanded: string } | null {
+  let canonical: string | null = null
+
+  // Try structured bio patterns first
+  if (bio) {
+    for (const pattern of BIO_PATTERNS) {
+      const match = bio.match(pattern)
+      if (match?.[1]) {
+        const raw = match[1].split('\n')[0].trim().replace(/[.!|·•—–\-🏳🌈]+$/, '').trim()
+        if (raw.length > 1 && raw.length < 80) {
+          canonical = normalizeLocation(raw)
+          if (canonical) break
+        }
+      }
+    }
+  }
+
+  // Try display name city scan (may refine broad bio match)
+  const nameCity = scanTextForCity(displayName)
+  if (nameCity) {
+    if (!canonical || isMoreSpecific(nameCity, canonical)) {
+      canonical = nameCity
+    }
+  }
+
+  // Fallback: scan bio for city keywords and aliases
+  if (!canonical && bio) {
+    const bioLower = bio.toLowerCase()
+    for (const [keyword, loc] of CITY_NAMES) {
+      if (keyword.length <= 4) {
+        if (new RegExp(`\\b${keyword}\\b`, 'i').test(bio)) { canonical = loc; break }
+      } else if (bioLower.includes(keyword)) { canonical = loc; break }
+    }
+    if (!canonical) {
+      for (const [alias, loc] of BIO_ALIASES) {
+        if (new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(bio)) {
+          canonical = loc; break
+        }
+      }
+    }
+  }
+
+  if (!canonical) return null
+
+  // Skip broad/region matches — we want a city for meaningful nearby search
+  if (BROAD_LOCATIONS.has(canonical)) return null
+
+  return { canonical, expanded: expandLocation(canonical) }
+}
+
+/**
+ * Get search query terms for a canonical location.
+ * Returns the city name plus any aliases that map to the same canonical form.
+ */
+export function getSearchTermsForLocation(canonical: string): string[] {
+  const terms = new Set<string>()
+
+  // The city name from the canonical form (e.g. "Seattle" from "Seattle, US")
+  const city = canonical.split(',')[0].trim()
+  if (city) terms.add(city)
+
+  // Reverse-lookup keywords that point to this canonical location
+  const keywords = getReverseKeywords().get(canonical) ?? []
+  for (const k of keywords) {
+    if (k.length >= 3) terms.add(k)
+  }
+
+  // Reverse-lookup aliases
+  const aliases = getReverseAliases().get(canonical) ?? []
+  for (const a of aliases) {
+    if (a.length >= 3) terms.add(a)
+  }
+
+  return [...terms]
+}
+
+/**
+ * Check if a profile's bio/display name matches a specific canonical location.
+ * Used to filter search results to only people actually in the target city.
+ */
+export function profileMatchesLocation(
+  bio: string | undefined,
+  displayName: string | undefined,
+  targetCanonical: string,
+): boolean {
+  const detected = detectUserCity(bio ?? '', displayName ?? '')
+  if (!detected) return false
+  // Exact match on canonical form
+  if (detected.canonical === targetCanonical) return true
+  // Also match if the detected city is a more specific version within the same location
+  // e.g. target is "San Francisco, US" and detected is also "San Francisco, US" via alias
+  return false
+}

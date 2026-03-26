@@ -66,7 +66,7 @@ function App() {
         {result && mode === 'location' && (
           <div className="space-y-8">
             <ProfileSummary profile={result.profile} />
-            <FollowerLocations followers={result.followers} followerDids={result.followerDids} followingDids={result.followingDids} />
+            <FollowerLocations followers={result.followers} followerDids={result.followerDids} followingDids={result.followingDids} nearbyProfiles={result.nearbyProfiles} detectedCity={result.detectedCity} />
           </div>
         )}
 

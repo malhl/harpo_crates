@@ -645,3 +645,102 @@ export async function computeBestieScores(
   const interactedDids = new Set(incomingScores.keys())
   return { scores: new Map(sorted.slice(0, 20)), interactedDids }
 }
+
+/**
+ * Search for Bluesky users matching given query terms.
+ * Paginates through searchActors for each query, deduplicating across queries.
+ *
+ * @param queries - Search terms (e.g. ["Seattle", "SEA"])
+ * @param pagesPerQuery - Max pages to fetch per query (100 results/page)
+ * @param onProgress - Called with (profiles found so far, status message)
+ * @param isAborted - Optional abort checker
+ * @returns Deduplicated array of SlimProfile results
+ */
+export async function searchNearbyActors(
+  queries: string[],
+  pagesPerQuery: number,
+  onProgress: (loaded: number, message: string) => void,
+  isAborted?: IsAborted,
+): Promise<{ profiles: SlimProfile[]; apiCalls: number }> {
+  const seen = new Set<string>()
+  const profiles: SlimProfile[] = []
+  let apiCalls = 0
+
+  for (const query of queries) {
+    let cursor: string | undefined
+    let pages = 0
+
+    do {
+      checkAborted(isAborted)
+      const res = await agent.searchActors({ q: query, limit: 100, cursor })
+      apiCalls++
+
+      for (const actor of res.data.actors) {
+        if (!seen.has(actor.did)) {
+          seen.add(actor.did)
+          profiles.push({
+            did: actor.did,
+            handle: actor.handle,
+            displayName: actor.displayName,
+            avatar: actor.avatar,
+            description: actor.description,
+          })
+        }
+      }
+
+      cursor = res.data.cursor
+      pages++
+      onProgress(profiles.length, `Searching "${query}" (${profiles.length} found)...`)
+
+      if (cursor) await delay(200)
+    } while (cursor && pages < pagesPerQuery)
+  }
+
+  return { profiles, apiCalls }
+}
+
+/**
+ * For each profile, fetch one page of their followers and count how many
+ * overlap with a known network (followerDids + followingDids).
+ * Returns a Map of DID → shared connection count. Profiles with 0 overlap are omitted.
+ * Processes 3 concurrently for speed.
+ */
+export async function checkSharedConnections(
+  profiles: SlimProfile[],
+  networkDids: Set<string>,
+  onProgress: (checked: number, total: number) => void,
+  isAborted?: IsAborted,
+): Promise<{ shared: Map<string, number>; apiCalls: number }> {
+  const shared = new Map<string, number>()
+  let apiCalls = 0
+  let checked = 0
+  const CONCURRENCY = 3
+
+  for (let i = 0; i < profiles.length; i += CONCURRENCY) {
+    checkAborted(isAborted)
+    const batch = profiles.slice(i, i + CONCURRENCY)
+
+    const results = await Promise.all(
+      batch.map(async (p) => {
+        try {
+          const res = await agent.getFollowers({ actor: p.did, limit: 100 })
+          const overlap = res.data.followers.filter(f => networkDids.has(f.did)).length
+          return { did: p.did, overlap }
+        } catch {
+          return { did: p.did, overlap: 0 }
+        }
+      })
+    )
+
+    apiCalls += batch.length
+    for (const { did, overlap } of results) {
+      if (overlap > 0) shared.set(did, overlap)
+    }
+
+    checked += batch.length
+    onProgress(checked, profiles.length)
+    if (i + CONCURRENCY < profiles.length) await delay(200)
+  }
+
+  return { shared, apiCalls }
+}

@@ -3,6 +3,9 @@ import {
   inferTimezone,
   scanPostsForLocations,
   scanFollowerLocations,
+  detectUserCity,
+  getSearchTermsForLocation,
+  profileMatchesLocation,
 } from './locationInference'
 
 // ── Helper to build minimal follower objects ──
@@ -441,5 +444,150 @@ describe('scanFollowerLocations', () => {
       expect(result.detected).toBe(2)
       expect(result.total).toBe(3)
     })
+  })
+})
+
+// ── detectUserCity ──
+
+describe('detectUserCity', () => {
+  it('detects city from bio pattern', () => {
+    const result = detectUserCity('📍 Seattle, WA', 'Some User')
+    expect(result).not.toBeNull()
+    expect(result!.canonical).toBe('Seattle, US')
+    expect(result!.expanded).toBe('Seattle, Washington, United States')
+  })
+
+  it('detects city from display name', () => {
+    const result = detectUserCity('', 'Seattle Mike')
+    expect(result).not.toBeNull()
+    expect(result!.canonical).toBe('Seattle, US')
+  })
+
+  it('returns null when no city detected', () => {
+    expect(detectUserCity('Cat lover', 'Just Vibes')).toBeNull()
+  })
+
+  it('returns null for broad locations (states, countries)', () => {
+    expect(detectUserCity('Based in California', '')).toBeNull()
+    expect(detectUserCity('UK based', '')).toBeNull()
+  })
+
+  it('prefers specific city from display name over broad bio match', () => {
+    const result = detectUserCity('California vibes', 'Los Angeles Dan')
+    expect(result).not.toBeNull()
+    expect(result!.canonical).toBe('Los Angeles, US')
+  })
+
+  it('detects city from alias in bio', () => {
+    const result = detectUserCity('PDX native', '')
+    expect(result).not.toBeNull()
+    expect(result!.canonical).toBe('Portland, US')
+  })
+})
+
+// ── getSearchTermsForLocation ──
+
+describe('getSearchTermsForLocation', () => {
+  it('returns city name and aliases for Seattle', () => {
+    const terms = getSearchTermsForLocation('Seattle, US')
+    expect(terms).toContain('Seattle')
+    expect(terms).toContain('sea')
+  })
+
+  it('returns city name and aliases for San Francisco', () => {
+    const terms = getSearchTermsForLocation('San Francisco, US')
+    expect(terms).toContain('San Francisco')
+  })
+
+  it('returns city name and aliases for Philadelphia', () => {
+    const terms = getSearchTermsForLocation('Philadelphia, US')
+    expect(terms).toContain('Philadelphia')
+    expect(terms).toContain('philly')
+  })
+
+  it('includes short aliases like ATL', () => {
+    const terms = getSearchTermsForLocation('Atlanta, US')
+    expect(terms).toContain('Atlanta')
+    expect(terms).toContain('atl')
+  })
+
+  it('returns at least the city name for any location', () => {
+    const terms = getSearchTermsForLocation('Tokyo, Japan')
+    expect(terms).toContain('Tokyo')
+    expect(terms.length).toBeGreaterThanOrEqual(1)
+  })
+})
+
+// ── profileMatchesLocation ──
+
+describe('profileMatchesLocation', () => {
+  it('matches when bio contains the target city', () => {
+    expect(profileMatchesLocation('📍 Seattle, WA', 'User', 'Seattle, US')).toBe(true)
+  })
+
+  it('matches when display name contains the target city', () => {
+    expect(profileMatchesLocation('', 'Seattle Mike', 'Seattle, US')).toBe(true)
+  })
+
+  it('does not match a different city', () => {
+    expect(profileMatchesLocation('📍 Portland, OR', 'User', 'Seattle, US')).toBe(false)
+  })
+
+  it('does not match when no location is detected', () => {
+    expect(profileMatchesLocation('Cat lover', 'User', 'Seattle, US')).toBe(false)
+  })
+
+  it('matches via alias', () => {
+    expect(profileMatchesLocation('SEA native', undefined, 'Seattle, US')).toBe(true)
+  })
+})
+
+// ── detectUserCity — additional edge cases for nearby search ──
+
+describe('detectUserCity — nearby search edge cases', () => {
+  it('detects city from "City, ST" bio pattern', () => {
+    const result = detectUserCity('Olympia, WA', '')
+    expect(result).not.toBeNull()
+    expect(result!.canonical).toBe('Olympia, US')
+    expect(result!.expanded).toBe('Olympia, Washington, United States')
+  })
+
+  it('rejects PNW as too broad for nearby search', () => {
+    // PNW maps to "Pacific Northwest, US" which is in BROAD_LOCATIONS
+    expect(detectUserCity('PNW native', '')).toBeNull()
+  })
+
+  it('rejects standalone state names', () => {
+    expect(detectUserCity('Texas forever', '')).toBeNull()
+  })
+
+  it('detects city via keyword fallback in bio text', () => {
+    const result = detectUserCity('I write code and drink coffee in Minneapolis', '')
+    expect(result).not.toBeNull()
+    expect(result!.canonical).toBe('Minneapolis, US')
+  })
+})
+
+// ── getSearchTermsForLocation — edge cases ──
+
+describe('getSearchTermsForLocation — edge cases', () => {
+  it('returns multiple aliases for Pittsburgh', () => {
+    const terms = getSearchTermsForLocation('Pittsburgh, US')
+    expect(terms).toContain('Pittsburgh')
+    expect(terms).toContain('pgh')
+    expect(terms).toContain('pit')
+  })
+
+  it('returns multiple aliases for Washington DC', () => {
+    const terms = getSearchTermsForLocation('Washington DC, US')
+    expect(terms).toContain('Washington DC')
+    expect(terms).toContain('washington dc')
+    expect(terms).toContain('dmv')
+  })
+
+  it('returns terms for non-US cities', () => {
+    const terms = getSearchTermsForLocation('London, UK')
+    expect(terms).toContain('London')
+    expect(terms.length).toBeGreaterThanOrEqual(1)
   })
 })

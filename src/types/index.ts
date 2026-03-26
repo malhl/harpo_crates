@@ -78,6 +78,10 @@ export interface AnalysisResult {
   followerDids?: Set<string>
   /** DIDs of accounts the target follows (location mode) */
   followingDids?: Set<string>
+  /** Nearby Bluesky users found via search who share the target's city (location mode) */
+  nearbyProfiles?: EnrichedFollower[]
+  /** The detected city of the target user, expanded form (location mode) */
+  detectedCity?: string
 }
 
 /**

@@ -17,6 +17,8 @@ interface Props {
   followers: EnrichedFollower[]
   followerDids?: Set<string>
   followingDids?: Set<string>
+  nearbyProfiles?: EnrichedFollower[]
+  detectedCity?: string
 }
 
 interface Band {
@@ -128,11 +130,14 @@ function tileClasses(did: string, followerDids?: Set<string>, followingDids?: Se
   return 'border border-cream-dark bg-white'
 }
 
-export function FollowerLocations({ followers, followerDids, followingDids }: Props) {
+export function FollowerLocations({ followers, followerDids, followingDids, nearbyProfiles, detectedCity }: Props) {
   const [activeBand, setActiveBand] = useState(0)
+  const [localityActive, setLocalityActive] = useState(false)
   const [expandedLocation, setExpandedLocation] = useState<string | null>(null)
   const [tileCounts, setTileCounts] = useState<Record<string, number>>({})
   const [grouping, setGrouping] = useState<Grouping>('specific')
+  const [showNearby, setShowNearby] = useState(true)
+  const [nearbyVisible, setNearbyVisible] = useState(TILE_PAGE_SIZE)
 
   const hasRelData = !!(followerDids || followingDids)
 
@@ -154,14 +159,39 @@ export function FollowerLocations({ followers, followerDids, followingDids }: Pr
 
   const bands = useMemo(() => computeBands(result.ranked), [result.ranked])
 
+  // Which location row should show nearby results at the current grouping level
+  const nearbyLocationKey = useMemo(
+    () => detectedCity ? groupLocation(detectedCity, grouping) : null,
+    [detectedCity, grouping],
+  )
+
+  // Locality band: the user's own city/region/country at the current grouping level
+  const localityLocations = useMemo(() => {
+    if (!nearbyLocationKey) return []
+    return result.ranked.filter(([loc]) => loc === nearbyLocationKey)
+  }, [nearbyLocationKey, result.ranked])
+
+  const hasLocality = localityLocations.length > 0 && !!detectedCity
+
+  // Short label for the locality pill — just the first part(s) matching the grouping
+  const localityLabel = useMemo(() => {
+    if (!nearbyLocationKey) return ''
+    const parts = nearbyLocationKey.split(',').map(s => s.trim())
+    if (parts.length <= 1) return nearbyLocationKey
+    // Drop the last part (country) for a shorter label, unless it's the only part
+    return parts.slice(0, -1).join(', ')
+  }, [nearbyLocationKey])
+
   const detectedPct = result.total > 0 ? Math.round((result.detected / result.total) * 100) : 0
   const maxCount = result.ranked[0]?.[1] ?? 1
 
   const safeBand = activeBand < bands.length ? activeBand : 0
   const currentBand = bands[safeBand]
-  const bandLocations = currentBand
-    ? result.ranked.filter(([, count]) => count >= currentBand.min && count <= currentBand.max)
-    : []
+  const bandLocations = localityActive
+    ? localityLocations
+    : currentBand
+      ? result.ranked.filter(([, count]) => count >= currentBand.min && count <= currentBand.max)
+      : []
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-4">
@@ -193,7 +223,7 @@ export function FollowerLocations({ followers, followerDids, followingDids }: Pr
           {GROUPING_OPTIONS.map(opt => (
             <button
               key={opt.value}
-              onClick={() => { setGrouping(opt.value); setActiveBand(0); setExpandedLocation(null) }}
+              onClick={() => { setGrouping(opt.value); setActiveBand(0); setLocalityActive(false); setExpandedLocation(null) }}
               className={`px-3 py-1 rounded-full text-xs font-medium transition-colors cursor-pointer ${
                 grouping === opt.value
                   ? 'bg-blue text-white'
@@ -216,16 +246,28 @@ export function FollowerLocations({ followers, followerDids, followingDids }: Pr
       ) : (
         <div className="space-y-3">
           {/* Band selector */}
-          {bands.length > 1 && (
+          {(bands.length > 1 || hasLocality) && (
             <div className="flex flex-wrap gap-1.5">
+              {hasLocality && (
+                <button
+                  onClick={() => { setLocalityActive(true); setExpandedLocation(null) }}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
+                    localityActive
+                      ? 'bg-gold text-white'
+                      : 'bg-white border border-gold text-gold hover:bg-gold-faint'
+                  }`}
+                >
+                  {localityLabel} <span className="opacity-70">({localityLocations.reduce((sum, [, c]) => sum + c, 0)})</span>
+                </button>
+              )}
               {bands.map((band, i) => {
                 const count = result.ranked.filter(([, c]) => c >= band.min && c <= band.max).reduce((sum, [, c]) => sum + c, 0)
                 return (
                   <button
                     key={band.label}
-                    onClick={() => { setActiveBand(i); setExpandedLocation(null) }}
+                    onClick={() => { setActiveBand(i); setLocalityActive(false); setExpandedLocation(null) }}
                     className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
-                      safeBand === i
+                      !localityActive && safeBand === i
                         ? 'bg-blue text-white'
                         : 'bg-white border border-cream-dark text-navy-faint hover:border-navy-faint'
                     }`}
@@ -263,7 +305,9 @@ export function FollowerLocations({ followers, followerDids, followingDids }: Pr
                     <span className="relative text-navy-faint">{isExpanded ? '▲' : '▼'}</span>
                   </button>
 
-                  {isExpanded && (
+                  {isExpanded && (() => {
+                    const hasNearby = nearbyLocationKey === location && nearbyProfiles && nearbyProfiles.length > 0
+                    return (
                     <div className="mt-2 max-h-[500px] overflow-y-auto pr-1">
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                         {visibleHandles.map(handle => {
@@ -298,14 +342,71 @@ export function FollowerLocations({ followers, followerDids, followingDids }: Pr
                           Show more ({visibleTiles} of {handles.length})
                         </button>
                       )}
+
+                      {/* Nearby people from search — inline within the matching city */}
+                      {hasNearby && (
+                        <div className="mt-4 pt-4 border-t border-cream-dark">
+                          <div className="flex items-center justify-between mb-3">
+                            <p className="text-sm font-medium text-navy">
+                              Others in {detectedCity?.split(',')[0]} <span className="text-navy-faint font-normal">({nearbyProfiles!.length} from search)</span>
+                            </p>
+                            <button
+                              onClick={() => setShowNearby(v => !v)}
+                              className="text-xs text-blue hover:text-blue-light font-medium cursor-pointer"
+                            >
+                              {showNearby ? 'Hide' : 'Show'}
+                            </button>
+                          </div>
+                          {showNearby && (
+                            <>
+                              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                                {nearbyProfiles!.slice(0, nearbyVisible).map(p => (
+                                  <a
+                                    key={p.did}
+                                    href={`https://bsky.app/profile/${p.handle}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex flex-col items-center text-center p-4 rounded-lg border border-dashed border-cream-dark bg-white hover:shadow-sm transition-all no-underline"
+                                  >
+                                    {p.avatar ? (
+                                      <img src={p.avatar} alt="" className="w-[84px] h-[84px] rounded-full" />
+                                    ) : (
+                                      <div className="w-[84px] h-[84px] rounded-full bg-cream-dark" />
+                                    )}
+                                    <span className="font-medium text-navy text-sm mt-2 truncate w-full">
+                                      {p.displayName || p.handle}
+                                    </span>
+                                    <span className="text-xs text-navy-faint truncate w-full">@{p.handle}</span>
+                                    {p.sharedFollowsCount > 0 && (
+                                      <span className="text-xs text-blue mt-1">
+                                        {p.sharedFollowsCount} shared
+                                      </span>
+                                    )}
+                                  </a>
+                                ))}
+                              </div>
+                              {nearbyProfiles!.length > nearbyVisible && (
+                                <button
+                                  onClick={() => setNearbyVisible(v => v + TILE_PAGE_SIZE)}
+                                  className="w-full mt-3 py-2 text-sm text-blue hover:text-blue-light font-medium hover:bg-blue-faint rounded-lg transition-colors cursor-pointer"
+                                >
+                                  Show more ({nearbyVisible} of {nearbyProfiles!.length})
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  )}
+                    )
+                  })()}
                 </div>
               )
             })}
           </div>
         </div>
       )}
+
     </div>
   )
 }
