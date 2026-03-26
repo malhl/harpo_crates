@@ -34,6 +34,20 @@ Open `http://localhost:5173` and enter a Bluesky handle (e.g. `user.bsky.social`
 | **Vitest** | Unit and integration testing framework |
 | **React Testing Library** | Component testing with user-centric queries |
 
+## Analysis Modes
+
+Choose an analysis mode before searching to control which pipeline steps run:
+
+| Mode | Label | What it does |
+|---|---|---|
+| **Full Analysis** | Full Analysis | Runs the complete pipeline: profile, followers, following, enrichment, interactions, shared follows, and stats |
+| **Besties** | Besties | Profile + followers + following + enrichment + interaction scoring (skips shared follows) |
+| **Inner Circle** | Inner Circle | Profile + followers + following + enrichment + shared follows (skips interactions) |
+| **Locals** | Locals | Profile + followers only — scans all follower bios for location signals and displays an aggregate geographic breakdown |
+| **Lurkers** | Lurkers | Profile + followers + following + enrichment only (skips both interactions and shared follows) |
+
+Each mode skips unnecessary heavy API steps, so lighter modes like Locals complete much faster than a Full Analysis.
+
 ## How It Works
 
 When you enter a Bluesky handle, Harpo Crates runs a multi-step analysis pipeline entirely in your browser:
@@ -121,6 +135,19 @@ A 200ms delay is inserted between API requests, with up to 3 concurrent requests
 - **Text search** filters across handle, display name, and bio content
 - **"Show more" pagination** loads 52 tiles at a time
 
+### Locals (Follower Location Breakdown)
+
+Scans all follower bios for location signals and displays a ranked geographic breakdown:
+
+- **Detection methods** (in priority order):
+  1. **Bio patterns** — "Based in...", "Living in...", "📍", "City, ST" formats
+  2. **City keyword matching** — recognizes 100+ major cities worldwide
+  3. **Alias matching** — abbreviations like ATL, PDX, UK, etc.
+- **Normalization** — merges variants ("Seattle, WA" + "Seattle" → "Seattle, WA, US") with state/province labels for US, Canadian, and Australian cities
+- **Count-based band paging** — locations grouped into ~10 pages by follower count (e.g. "50+", "20–49", "10–19")
+- **Expandable tiles** — click any location to see follower tiles (avatar, name, handle) sorted alphabetically
+- **Proportional bars** — each location row shows a background bar scaled relative to the top location
+
 ### Color Palette
 
 Custom warm palette with navy, blue, gold, burgundy, and cream tones defined via Tailwind CSS v4 `@theme` configuration.
@@ -130,28 +157,31 @@ Custom warm palette with navy, blue, gold, burgundy, and cream tones defined via
 ```
 src/
 ├── api/
-│   └── bluesky.ts            # AT Protocol API service layer
+│   └── bluesky.ts              # AT Protocol API service layer
 │
 ├── components/
-│   ├── SearchBar.tsx          # Handle input form
-│   ├── ProfileSummary.tsx     # Target user's profile card
-│   ├── LoadingProgress.tsx    # Cumulative analysis progress bar
-│   ├── FollowerDashboard.tsx  # Overview stats + categories + follower list
-│   ├── CategorySection.tsx    # Expandable category with tile grid
-│   └── FollowerList.tsx       # Sortable/filterable follower tile grid
+│   ├── SearchBar.tsx            # Handle input + analysis mode selector
+│   ├── ProfileSummary.tsx       # Target user's profile card
+│   ├── LoadingProgress.tsx      # Cumulative analysis progress bar
+│   ├── FollowerDashboard.tsx    # Overview stats + categories + follower list
+│   ├── FollowerLocations.tsx    # Aggregate follower location breakdown (Locals mode)
+│   ├── CategorySection.tsx      # Expandable category with tile grid
+│   └── FollowerList.tsx         # Sortable/filterable follower tile grid
 │
 ├── hooks/
-│   └── useFollowerAnalysis.ts # Analysis pipeline orchestrator
+│   └── useFollowerAnalysis.ts   # Mode-aware analysis pipeline orchestrator
 │
 ├── utils/
-│   └── stats.ts               # Statistics computation and formatting
+│   ├── stats.ts                 # Statistics computation and formatting
+│   ├── locationInference.ts     # Bio location parsing, normalization, and batch scanning
+│   └── debug.ts                 # Debug logging utilities
 │
 ├── types/
-│   └── index.ts               # TypeScript type definitions and category configs
+│   └── index.ts                 # TypeScript type definitions, modes, and category configs
 │
-├── App.tsx                    # Root component
-├── main.tsx                   # Entry point
-└── index.css                  # Tailwind CSS import and custom theme
+├── App.tsx                      # Root component
+├── main.tsx                     # Entry point
+└── index.css                    # Tailwind CSS import and custom theme
 ```
 
 ## API Reference
@@ -179,7 +209,6 @@ npm run test:coverage # Coverage report
 
 ## Planned Features
 
-- **More follower categories** — organize followers by bio-based interests and other signals
 - **Growth tracking** — store snapshots in localStorage to track follower changes over time
 - **Data export** — CSV/JSON export of follower data
 - **Comparison mode** — compare two users' follower bases
