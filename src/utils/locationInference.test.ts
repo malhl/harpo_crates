@@ -317,6 +317,30 @@ describe('scanFollowerLocations', () => {
     })
   })
 
+  describe('normalizeLocation — state + country patterns', () => {
+    it('resolves "PA USA" to Pennsylvania, not United States', () => {
+      const result = scanFollowerLocations([
+        follower('a', '📍 PA USA'),
+      ])
+      expect(result.locations.has('Pennsylvania, United States')).toBe(true)
+      expect(result.locations.has('United States')).toBe(false)
+    })
+
+    it('resolves "CA US" to California', () => {
+      const result = scanFollowerLocations([
+        follower('a', '📍 CA US'),
+      ])
+      expect(result.locations.has('California, United States')).toBe(true)
+    })
+
+    it('resolves "Pittsburgh, PA USA" with trailing country', () => {
+      const result = scanFollowerLocations([
+        follower('a', '📍 Pittsburgh, PA USA'),
+      ])
+      expect(result.locations.has('Pittsburgh, Pennsylvania, United States')).toBe(true)
+    })
+  })
+
   describe('normalizeLocation — garbage rejection', () => {
     it('rejects non-location bio text', () => {
       const result = scanFollowerLocations([

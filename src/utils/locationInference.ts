@@ -678,8 +678,8 @@ function normalizeLocation(raw: string): string | null {
   const alias = BIO_ALIASES.get(lower)
   if (alias) return alias
 
-  // "City, ST" pattern — e.g. "Seattle, WA" or "Portland, OR"
-  const cityStateMatch = cleaned.match(/^([A-Za-z\s.'-]+),\s*([A-Z]{2})$/i)
+  // "City, ST" pattern — e.g. "Seattle, WA", "Portland, OR", "Pittsburgh, PA USA"
+  const cityStateMatch = cleaned.match(/^([A-Za-z\s.'-]+),\s*([A-Z]{2})(?:\s+(?:USA|US|United\s+States))?$/i)
   if (cityStateMatch) {
     const city = cityStateMatch[1].trim()
     const state = cityStateMatch[2].toLowerCase()
@@ -724,6 +724,13 @@ function normalizeLocation(raw: string): string | null {
     if (keyword.length >= 5 && lower.includes(keyword)) {
       return location
     }
+  }
+
+  // "ST USA" / "ST US" pattern — e.g. "PA USA", "TX US" (no comma, state abbrev + country)
+  const stateCountryMatch = cleaned.match(/^([A-Z]{2})\s+(?:USA|US|United\s+States)$/i)
+  if (stateCountryMatch) {
+    const stateInfo = STATE_FULL_NAMES.get(stateCountryMatch[1].toLowerCase())
+    if (stateInfo) return `${stateInfo[0]}, ${stateInfo[1]}`
   }
 
   // Check aliases within the text (handles "PNW usa", "central NJ", etc.)
